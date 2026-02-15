@@ -1,9 +1,13 @@
 package ai.teraunit.core.api;
 
-@org.springframework.stereotype.Controller
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+
+@Controller
 public class HomeRedirectController {
-    @org.springframework.web.bind.annotation.GetMapping("/")
+
+    @GetMapping("/")
     public String index() {
-        return "redirect:/swagger-ui.html";
+        return "redirect:/swagger-ui/index.html";
     }
 }
