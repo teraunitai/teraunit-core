@@ -4,6 +4,8 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
+
 @RestController
 public class PricingController {
 
@@ -14,7 +16,11 @@ public class PricingController {
     }
 
     @GetMapping("/v1/pricing")
-    public Object getPricing() {
-        return redis.opsForValue().get("GPU:PRICE:RAW");
+    public Map<String, Object> getPricing() {
+        return Map.of(
+                "lambda", redis.opsForValue().get("RAW_PRICE:LAMBDA"),
+                "runpod", redis.opsForValue().get("RAW_PRICE:RUNPOD"),
+                "vast", redis.opsForValue().get("RAW_PRICE:VAST")
+        );
     }
 }

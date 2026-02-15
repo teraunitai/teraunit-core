@@ -7,20 +7,18 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-
-import java.util.Base64;
 import java.util.Map;
 
 @Component
-public class LambdaScraper implements GpuProviderScraper {
+public class VastScraper implements GpuProviderScraper {
 
     private final RestClient restClient;
     private final ApplicationEventPublisher publisher;
 
-    @Value("${LAMBDA_API_KEY:missing_key}")
+    @Value("${VAST_API_KEY:missing_key}")
     private String apiKey;
 
-    public LambdaScraper(RestClient restClient, ApplicationEventPublisher publisher) {
+    public VastScraper(RestClient restClient, ApplicationEventPublisher publisher) {
         this.restClient = restClient;
         this.publisher = publisher;
     }
@@ -29,31 +27,26 @@ public class LambdaScraper implements GpuProviderScraper {
     @Scheduled(fixedRate = 60000)
     public void scrape() {
         try {
-            // Lambda Labs requires Basic Auth: base64("API_KEY:")
-            String authHeader = "Basic " + Base64.getEncoder()
-                    .encodeToString((apiKey + ":").getBytes());
-
-            // Correct Lambda Labs pricing endpoint
-            String endpoint = "https://cloud.lambdalabs.com/api/v1/instance-types";
+            // Vast.ai industrial marketplace endpoint
+            String endpoint = "https://console.vast.ai";
 
             @SuppressWarnings("unchecked")
             Map<String, Object> response = restClient.get()
+                    // FIX: Use the simple string URI. RestClient handles the URL.
                     .uri(endpoint)
-                    .header("Authorization", authHeader)
+                    .header("Accept", "application/json")
+                    // VAST uses Bearer Token for the API Key
+                    .header("Authorization", "Bearer " + apiKey)
                     .retrieve()
                     .body(Map.class);
 
             if (response != null) {
-                publisher.publishEvent(
-                        new GpuPriceScrapedEvent(ProviderName.LAMBDA, response)
-                );
-                System.out.println("[TeraUnit-Pulse] Lambda pricing scraped successfully.");
-            } else {
-                System.err.println("[TeraUnit-Warn] Lambda returned null response.");
+                publisher.publishEvent(new GpuPriceScrapedEvent(ProviderName.VAST, response));
+                System.out.println("[TeraUnit-Pulse] Vast.ai marketplace scraped successfully.");
             }
-
         } catch (Exception e) {
-            System.err.println("[TeraUnit-Error] Lambda Scrape Failed: " + e.getMessage());
+            System.err.println("[TeraUnit-Error] Vast Scrape Failed: " + e.getMessage());
         }
     }
+
 }
