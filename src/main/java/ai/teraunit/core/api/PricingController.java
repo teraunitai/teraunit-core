@@ -3,7 +3,7 @@ package ai.teraunit.core.api;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -17,10 +17,10 @@ public class PricingController {
 
     @GetMapping("/v1/pricing")
     public Map<String, Object> getPricing() {
-        return Map.of(
-                "lambda", redis.opsForValue().get("RAW_PRICE:LAMBDA"),
-                "runpod", redis.opsForValue().get("RAW_PRICE:RUNPOD"),
-                "vast", redis.opsForValue().get("RAW_PRICE:VAST")
-        );
+        Map<String, Object> allPricing = new HashMap<>();
+        allPricing.put("lambda", redis.opsForValue().get("CLEAN_OFFERS:LAMBDA"));
+        allPricing.put("runpod", redis.opsForValue().get("CLEAN_OFFERS:RUNPOD"));
+        allPricing.put("vast", redis.opsForValue().get("CLEAN_OFFERS:VAST"));
+        return allPricing;
     }
 }

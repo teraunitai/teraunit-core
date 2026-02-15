@@ -1,16 +1,26 @@
 package ai.teraunit.core;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration; // Add this import
+import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})
+// Industrial Move: Exclusions removed. Database auto-wire is now active.
+@SpringBootApplication
 @EnableScheduling
 @EnableAsync
 public class TeraunitCoreApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(TeraunitCoreApplication.class, args);
+	}
+
+	@Bean
+	public CommandLineRunner debugRedisAuth(@Value("${spring.data.redis.password}") String password) {
+		return args -> {
+			System.out.println("DEBUG: Redis Password Length: " + (password != null ? password.length() : "NULL"));
+		};
 	}
 }
