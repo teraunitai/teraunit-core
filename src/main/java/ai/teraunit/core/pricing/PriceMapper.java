@@ -16,15 +16,18 @@ public class PriceMapper {
                 if (data != null) {
                     data.forEach((name, details) -> {
                         Map<String, Object> specs = (Map<String, Object>) details;
-                        // FIX: Defensive check for null price
                         Object priceObj = specs.get("price_cents");
                         if (priceObj != null) {
-                            offers.add(GpuOffer.builder()
-                                    .provider("LAMBDA")
-                                    .gpuModel(name.toUpperCase())
-                                    .pricePerHour(((Number) priceObj).doubleValue() / 100.0)
-                                    .isAvailable(true)
-                                    .build());
+                            double price = ((Number) priceObj).doubleValue() / 100.0;
+                            // FILTER: Ignore zero-price or empty names
+                            if (price > 0.01) {
+                                offers.add(GpuOffer.builder()
+                                        .provider("LAMBDA")
+                                        .gpuModel(name.toUpperCase())
+                                        .pricePerHour(price)
+                                        .isAvailable(true)
+                                        .build());
+                            }
                         }
                     });
                 }
@@ -34,13 +37,21 @@ public class PriceMapper {
                     List<Map<String, Object>> gpuTypes = (List<Map<String, Object>>) data.get("gpuTypes");
                     for (var gpu : gpuTypes) {
                         Object priceObj = gpu.get("communityPrice");
-                        if (priceObj != null) {
-                            offers.add(GpuOffer.builder()
-                                    .provider("RUNPOD")
-                                    .gpuModel((String) gpu.get("id"))
-                                    .pricePerHour(((Number) priceObj).doubleValue())
-                                    .isAvailable(true)
-                                    .build());
+                        String modelId = (String) gpu.get("id");
+
+                        if (priceObj != null && modelId != null) {
+                            double price = ((Number) priceObj).doubleValue();
+
+                            // FILTER: The "Trash" Collector
+                            // Rejects "unknown", nulls, and $0.00 items
+                            if (price > 0.001 && !modelId.equalsIgnoreCase("unknown")) {
+                                offers.add(GpuOffer.builder()
+                                        .provider("RUNPOD")
+                                        .gpuModel(modelId)
+                                        .pricePerHour(price)
+                                        .isAvailable(true)
+                                        .build());
+                            }
                         }
                     }
                 }
@@ -48,13 +59,17 @@ public class PriceMapper {
                 List<Map<String, Object>> vastOffers = (List<Map<String, Object>>) rawData.get("offers");
                 if (vastOffers != null) {
                     for (var offer : vastOffers) {
-                        offers.add(GpuOffer.builder()
-                                .provider("VAST")
-                                .gpuModel((String) offer.get("gpu_name"))
-                                .pricePerHour(((Number) offer.get("dph_total")).doubleValue())
-                                .region((String) offer.get("geolocation"))
-                                .isAvailable(true)
-                                .build());
+                        Double price = ((Number) offer.get("dph_total")).doubleValue();
+                        // FILTER: Basic sanity check for Vast
+                        if (price > 0.01) {
+                            offers.add(GpuOffer.builder()
+                                    .provider("VAST")
+                                    .gpuModel((String) offer.get("gpu_name"))
+                                    .pricePerHour(price)
+                                    .region((String) offer.get("geolocation"))
+                                    .isAvailable(true)
+                                    .build());
+                        }
                     }
                 }
             }
