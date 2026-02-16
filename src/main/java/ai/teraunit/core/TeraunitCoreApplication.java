@@ -16,11 +16,4 @@ public class TeraunitCoreApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(TeraunitCoreApplication.class, args);
 	}
-
-	@Bean
-	public CommandLineRunner debugRedisAuth(@Value("${spring.data.redis.password}") String password) {
-		return args -> {
-			System.out.println("DEBUG: Redis Password Length: " + (password != null ? password.length() : "NULL"));
-		};
-	}
 }

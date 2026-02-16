@@ -31,3 +31,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Add these to the bottom of your .gitignore
+.env
+.DS_Store
+*.log
+**/*.log
