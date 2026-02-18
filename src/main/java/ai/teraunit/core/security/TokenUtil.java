@@ -51,18 +51,36 @@ public final class TokenUtil {
             return "";
 
         // Strip common invisible/control chars (includes zero-width spaces) and trim.
-        // Keep it simple to avoid altering legitimate tokens.
-        String cleaned = apiKey
-                .replaceAll("[\\p{Cc}\\p{Cf}]", "")
-                .trim();
+        // Keep it simple but resilient to copy/paste formats.
+        String cleaned = apiKey.replaceAll("[\\p{Cc}\\p{Cf}]", "").trim();
 
-        // Also remove whitespace inside if it’s clearly accidental (newlines/tabs)
-        cleaned = cleaned.replace("\r", "").replace("\n", "").replace("\t", "");
+        // Common copy/paste mistake: pasting the full HTTP header
+        // Authorization: Bearer <token>
+        if (cleaned.regionMatches(true, 0, "Authorization:", 0, 14)) {
+            int idx = cleaned.indexOf(':');
+            cleaned = (idx >= 0) ? cleaned.substring(idx + 1).trim() : cleaned;
+        }
 
         // Common copy/paste mistake: including the scheme prefix
         if (cleaned.regionMatches(true, 0, "Bearer ", 0, 7)) {
             cleaned = cleaned.substring(7).trim();
         }
+
+        // Strip surrounding quotes (people often copy JSON/env values)
+        while (cleaned.length() >= 2) {
+            char first = cleaned.charAt(0);
+            char last = cleaned.charAt(cleaned.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
+                continue;
+            }
+            break;
+        }
+
+        // Tokens should never contain whitespace; remove any accidental
+        // spaces/newlines/tabs.
+        cleaned = cleaned.replaceAll("\\s+", "");
+
         return cleaned;
     }
 
