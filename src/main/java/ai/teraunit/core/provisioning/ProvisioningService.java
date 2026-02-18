@@ -7,6 +7,7 @@ import ai.teraunit.core.security.KeyVaultService;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class ProvisioningService {
@@ -19,11 +20,11 @@ public class ProvisioningService {
     private final RedisTemplate<String, Object> redis;
 
     public ProvisioningService(KeyVaultService vault,
-                               ProviderVerifier verifier,
-                               EgressGuard egressGuard,
-                               CloudExecutor executor,
-                               ReaperService reaper,
-                               RedisTemplate<String, Object> redis) {
+            ProviderVerifier verifier,
+            EgressGuard egressGuard,
+            CloudExecutor executor,
+            ReaperService reaper,
+            RedisTemplate<String, Object> redis) {
         this.vault = vault;
         this.verifier = verifier;
         this.egressGuard = egressGuard;
@@ -38,7 +39,8 @@ public class ProvisioningService {
         // PROTOCOL 12: SOVEREIGNTY SWITCH (GDPR/Compliance)
         // ---------------------------------------------------------
         if (!isSovereigntyCompliant(request.sourceRegion(), request.region())) {
-            throw new SecurityException("SOVEREIGNTY_VIOLATION: Data transfer between EU and Non-EU zones is prohibited.");
+            throw new SecurityException(
+                    "SOVEREIGNTY_VIOLATION: Data transfer between EU and Non-EU zones is prohibited.");
         }
 
         // ---------------------------------------------------------
@@ -60,8 +62,7 @@ public class ProvisioningService {
             boolean isProfitable = egressGuard.isSafeToMove(
                     targetPrice,
                     request.currentGpuHourlyCost(),
-                    request.datasetSizeGb()
-            );
+                    request.datasetSizeGb());
 
             if (!isProfitable) {
                 throw new SecurityException("EGRESS_BLOCK: This move loses money. Stay where you are.");
@@ -72,12 +73,16 @@ public class ProvisioningService {
         // EXECUTION & REGISTRATION
         // ---------------------------------------------------------
 
-        // Inside provision() method...
+        // 1. Generate heartbeat identity + token BEFORE launch so we can inject it into
+        // boot scripts
+        String heartbeatId = UUID.randomUUID().toString();
+        String heartbeatToken = ai.teraunit.core.security.TokenUtil.generateToken();
+        String heartbeatTokenSha256 = ai.teraunit.core.security.TokenUtil.sha256Hex(heartbeatToken);
 
-        // 1. Execute
-        String compositeId = executor.provision(request, request.apiKey());
+        // 2. Execute
+        String compositeId = executor.provision(request, request.apiKey(), heartbeatId, heartbeatToken);
 
-        // 2. PROTOCOL 6: REGISTER BIRTH
+        // 3. PROTOCOL 6: REGISTER BIRTH
         String storageKey = vault.encrypt(request.apiKey());
 
         String[] parts = compositeId.split("::");
@@ -86,8 +91,8 @@ public class ProvisioningService {
             ProviderName provider = ProviderName.valueOf(parts[0]);
             String realId = parts[1];
 
-            // Save to DB
-            reaper.registerBirth(realId, provider, storageKey);
+            // Save to DB (bind provider instanceId -> heartbeatId + token hash)
+            reaper.registerBirth(realId, heartbeatId, heartbeatTokenSha256, provider, storageKey);
         }
         return "SUCCESS: " + compositeId;
     }
@@ -96,7 +101,8 @@ public class ProvisioningService {
      * Checks if the Source and Target regions are legally compatible.
      */
     private boolean isSovereigntyCompliant(String source, String target) {
-        if (source == null || source.isEmpty()) return true;
+        if (source == null || source.isEmpty())
+            return true;
         boolean sourceEu = source.toLowerCase().startsWith("eu-");
         boolean targetEu = target.toLowerCase().startsWith("eu-");
         return sourceEu == targetEu;
@@ -109,7 +115,8 @@ public class ProvisioningService {
     private double fetchCurrentPrice(ProviderName provider, String instanceType) {
         try {
             List<GpuOffer> offers = (List<GpuOffer>) redis.opsForValue().get("CLEAN_OFFERS:" + provider);
-            if (offers == null) return 0.0;
+            if (offers == null)
+                return 0.0;
 
             return offers.stream()
                     // Relaxed matching for MVP (contains instead of exact equals)

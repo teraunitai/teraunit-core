@@ -11,17 +11,27 @@ public class LaunchController {
 
     private final ProvisioningService service;
     private final VelocityFuse fuse;
+    private final ai.teraunit.core.security.ControlAuth controlAuth;
+    private final ai.teraunit.core.security.ClientIpResolver clientIpResolver;
 
-    public LaunchController(ProvisioningService service, VelocityFuse fuse) {
+    public LaunchController(ProvisioningService service,
+            VelocityFuse fuse,
+            ai.teraunit.core.security.ControlAuth controlAuth,
+            ai.teraunit.core.security.ClientIpResolver clientIpResolver) {
         this.service = service;
         this.fuse = fuse;
+        this.controlAuth = controlAuth;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @PostMapping
     public String launchInstance(@RequestBody LaunchRequest request, HttpServletRequest servletRequest) {
         try {
+            // TRUST BOUNDARY: Control-plane token required
+            controlAuth.requireControlToken(servletRequest);
+
             // 1. PROTOCOL 13: VELOCITY FUSE
-            String ip = servletRequest.getRemoteAddr();
+            String ip = clientIpResolver.resolve(servletRequest);
             fuse.check(ip);
 
             // 2. EXECUTE
@@ -48,7 +58,8 @@ public class LaunchController {
                 return "FAILED: INVALID API KEY";
             }
             // --- 4. INVENTORY (The Fix for RunPod) ---
-            // Catches "SUPPLY_CONSTRAINT", "no longer any instances", "sold out", "unavailable"
+            // Catches "SUPPLY_CONSTRAINT", "no longer any instances", "sold out",
+            // "unavailable"
             if (msg.contains("supply_constraint") ||
                     msg.contains("no longer") ||
                     msg.contains("unavailable") ||
@@ -57,7 +68,8 @@ public class LaunchController {
                 return "FAILED: SOLD OUT (Race Condition)";
             }
 
-            // Fallback: Log the full nasty error to Console, show simplified version to User
+            // Fallback: Log the full nasty error to Console, show simplified version to
+            // User
             System.err.println("[LAUNCH-FAIL] " + e.getClass().getSimpleName() + ": " + e.getMessage());
             return "ERROR: PROVIDER REJECTED REQUEST (See Console)";
         }

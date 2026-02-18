@@ -9,7 +9,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -18,14 +17,14 @@ public class LambdaScraper implements GpuProviderScraper {
 
     private final RestClient restClient;
     private final RedisTemplate<String, Object> redis; // Added DB Access
-    private final PriceMapper priceMapper;             // Added Mapper Access
+    private final PriceMapper priceMapper; // Added Mapper Access
 
     @Value("${LAMBDA_API_KEY:missing_key}")
     private String apiKey;
 
     public LambdaScraper(RestClient restClient,
-                         RedisTemplate<String, Object> redis,
-                         PriceMapper priceMapper) {
+            RedisTemplate<String, Object> redis,
+            PriceMapper priceMapper) {
         this.restClient = restClient;
         this.redis = redis;
         this.priceMapper = priceMapper;
@@ -35,15 +34,14 @@ public class LambdaScraper implements GpuProviderScraper {
     @Scheduled(fixedRate = 60000)
     public void scrape() {
         try {
-            String authHeader = "Basic " + Base64.getEncoder()
-                    .encodeToString((apiKey + ":").getBytes());
+            String cleanKey = ai.teraunit.core.security.TokenUtil.sanitizeApiKey(apiKey);
 
-            String endpoint = "https://cloud.lambdalabs.com/api/v1/instance-types";
+            String endpoint = "https://cloud.lambda.ai/api/v1/instance-types";
 
             @SuppressWarnings("unchecked")
             Map<String, Object> response = restClient.get()
                     .uri(endpoint)
-                    .header("Authorization", authHeader)
+                    .header("Authorization", "Bearer " + cleanKey)
                     .retrieve()
                     .body(Map.class);
 

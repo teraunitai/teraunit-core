@@ -2,7 +2,6 @@ package ai.teraunit.core.provisioning;
 
 import ai.teraunit.core.common.ProviderName;
 import ai.teraunit.core.security.KeyVaultService;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import ai.teraunit.core.repository.InstanceEntity;
@@ -58,9 +57,20 @@ public class ReaperService {
         repository.save(entity);
     }
 
+    // Phase-5: bind heartbeats to a stable heartbeatId + token hash
+    public void registerBirth(String instanceId,
+            String heartbeatId,
+            String heartbeatTokenSha256,
+            ProviderName provider,
+            String encryptedKey) {
+        InstanceEntity entity = new InstanceEntity(instanceId, heartbeatId, heartbeatTokenSha256, provider,
+                encryptedKey);
+        repository.save(entity);
+    }
+
     // Called by HeartbeatController
-    public void registerHeartbeat(String instanceId) {
-        InstanceEntity entity = repository.findByInstanceId(instanceId);
+    public void registerHeartbeat(String heartbeatId) {
+        InstanceEntity entity = repository.findByHeartbeatId(heartbeatId);
         if (entity != null && entity.isActive()) {
             entity.heartbeat();
             repository.save(entity);

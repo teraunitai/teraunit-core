@@ -3,12 +3,16 @@ use sysinfo::{System, SystemExt, DiskExt};
 use std::time::{Instant, Duration};
 
 // CONFIGURATION
-// In Prod, this is passed via ENV or Flag. For MVP, we hardcode the endpoint.
-const SERVER_URL: &str = "https://teraunit-core.onrender.com/v1/heartbeat";
+// Prefer ENV to avoid baking control-plane URLs into binaries.
+const DEFAULT_SERVER_URL: &str = "https://teraunit-core.onrender.com/v1/heartbeat";
 const DEATH_TIMEOUT: u64 = 300; // 5 Minutes
 
 fn main() {
     println!("[TERA-AGENT] 🚀 TITANIUM PROTOCOL INITIATED...");
+
+    let server_url = std::env::var("TERA_HEARTBEAT_URL").unwrap_or_else(|_| DEFAULT_SERVER_URL.to_string());
+    let heartbeat_id_env = std::env::var("TERA_HEARTBEAT_ID").ok();
+    let heartbeat_token_env = std::env::var("TERA_HEARTBEAT_TOKEN").ok();
 
     // 1. IDENTITY LOCK
     let machine_id = hostname::get()
@@ -16,7 +20,10 @@ fn main() {
         .into_string()
         .unwrap_or("UNKNOWN".into());
 
-    println!("[TERA-AGENT] 🔒 ID LOCKED: {}", machine_id);
+    // Control plane binds heartbeat to a stable id; fall back to hostname if not provided.
+    let heartbeat_id = heartbeat_id_env.unwrap_or_else(|| machine_id.clone());
+
+    println!("[TERA-AGENT] 🔒 ID LOCKED: {}", heartbeat_id);
 
     // 2. HARDWARE SCAN (Data Warmer Check)
     let mut sys = System::new_all();
@@ -43,7 +50,7 @@ fn main() {
 
         // Construct Payload
         let payload = serde_json::json!({
-            "id": machine_id,
+            "id": heartbeat_id,
             "status": "alive",
             "ram_used": sys.used_memory(),
             "nvme_ready": has_nvme
@@ -51,7 +58,12 @@ fn main() {
 
         println!("[TERA-AGENT] 💓 PULSING SERVER...");
 
-        match client.post(SERVER_URL).json(&payload).send() {
+        let mut req = client.post(&server_url).json(&payload);
+        if let Some(token) = heartbeat_token_env.as_ref() {
+            req = req.header("X-Tera-Heartbeat-Token", token);
+        }
+
+        match req.send() {
             Ok(resp) => {
                 if resp.status().is_success() {
                     println!("[TERA-AGENT] ✅ ACKNOWLEDGED.");

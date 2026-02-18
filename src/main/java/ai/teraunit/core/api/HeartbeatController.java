@@ -3,6 +3,8 @@ package ai.teraunit.core.api;
 import ai.teraunit.core.provisioning.ReaperService;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import java.util.Map;
 
 @RestController
@@ -10,10 +12,13 @@ import java.util.Map;
 public class HeartbeatController {
 
     private final ReaperService reaper;
+    private final ai.teraunit.core.security.HeartbeatAuth heartbeatAuth;
 
     // INJECTION: Wire the Reaper, not Redis directly.
-    public HeartbeatController(ReaperService reaper) {
+    public HeartbeatController(ReaperService reaper,
+            ai.teraunit.core.security.HeartbeatAuth heartbeatAuth) {
         this.reaper = reaper;
+        this.heartbeatAuth = heartbeatAuth;
     }
 
     /**
@@ -21,13 +26,16 @@ public class HeartbeatController {
      * Updates the Immutable Ledger (PostgreSQL).
      */
     @PostMapping
-    public void pulse(@RequestBody Map<String, String> payload) {
-        String instanceId = payload.get("id");
-        if (instanceId == null) return;
+    public void pulse(@RequestBody Map<String, String> payload, HttpServletRequest request) {
+        String heartbeatId = payload.get("id");
+        if (heartbeatId == null || heartbeatId.isBlank())
+            return;
 
-        System.out.println("[PULSE] Received from: " + instanceId);
+        heartbeatAuth.requireValidHeartbeat(request, heartbeatId);
 
-        // UPDATE THE LEDGER OF TRUTH
-        reaper.registerHeartbeat(instanceId);
+        System.out.println("[PULSE] Received from: " + heartbeatId);
+
+        // UPDATE THE LEDGER OF TRUTH (bound to heartbeatId)
+        reaper.registerHeartbeat(heartbeatId);
     }
 }

@@ -12,4 +12,6 @@ public interface InstanceRepository extends JpaRepository<InstanceEntity, Long> 
     List<InstanceEntity> findZombies(Instant cutoff);
 
     InstanceEntity findByInstanceId(String instanceId);
+
+    InstanceEntity findByHeartbeatId(String heartbeatId);
 }

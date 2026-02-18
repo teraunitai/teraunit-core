@@ -17,6 +17,15 @@ public class InstanceEntity {
     @Column(nullable = false, unique = true)
     private String instanceId; // The Provider's ID (e.g., "12345")
 
+    // Heartbeat identity used by agents to authenticate (does NOT have to equal
+    // provider instanceId)
+    @Column(columnDefinition = "TEXT")
+    private String heartbeatId;
+
+    // SHA-256 hex of the heartbeat token (never store token plaintext)
+    @Column(columnDefinition = "TEXT")
+    private String heartbeatTokenSha256;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ProviderName provider;
@@ -36,10 +45,28 @@ public class InstanceEntity {
 
     // --- CONSTRUCTORS & GETTERS ---
 
-    public InstanceEntity() {}
+    public InstanceEntity() {
+    }
 
     public InstanceEntity(String instanceId, ProviderName provider, String encryptedApiKey) {
         this.instanceId = instanceId;
+        this.provider = provider;
+        this.encryptedApiKey = encryptedApiKey;
+        this.startTime = Instant.now();
+        this.lastHeartbeat = Instant.now();
+
+        // Backwards-compatible default: heartbeatId == provider instanceId
+        this.heartbeatId = instanceId;
+    }
+
+    public InstanceEntity(String instanceId,
+            String heartbeatId,
+            String heartbeatTokenSha256,
+            ProviderName provider,
+            String encryptedApiKey) {
+        this.instanceId = instanceId;
+        this.heartbeatId = heartbeatId;
+        this.heartbeatTokenSha256 = heartbeatTokenSha256;
         this.provider = provider;
         this.encryptedApiKey = encryptedApiKey;
         this.startTime = Instant.now();
@@ -55,9 +82,31 @@ public class InstanceEntity {
     }
 
     // Getters...
-    public String getInstanceId() { return instanceId; }
-    public ProviderName getProvider() { return provider; }
-    public String getEncryptedApiKey() { return encryptedApiKey; }
-    public Instant getLastHeartbeat() { return lastHeartbeat; }
-    public boolean isActive() { return isActive; }
+    public String getInstanceId() {
+        return instanceId;
+    }
+
+    public String getHeartbeatId() {
+        return heartbeatId;
+    }
+
+    public String getHeartbeatTokenSha256() {
+        return heartbeatTokenSha256;
+    }
+
+    public ProviderName getProvider() {
+        return provider;
+    }
+
+    public String getEncryptedApiKey() {
+        return encryptedApiKey;
+    }
+
+    public Instant getLastHeartbeat() {
+        return lastHeartbeat;
+    }
+
+    public boolean isActive() {
+        return isActive;
+    }
 }

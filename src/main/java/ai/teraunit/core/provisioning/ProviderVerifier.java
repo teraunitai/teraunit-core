@@ -20,9 +20,10 @@ public class ProviderVerifier {
 
     public boolean verify(LaunchRequest request, String apiKey) {
         // SANITIZATION PROTOCOL: Remove invisible spaces/newlines
-        String cleanKey = (apiKey != null) ? apiKey.trim() : "";
+        String cleanKey = ai.teraunit.core.security.TokenUtil.sanitizeApiKey(apiKey);
 
-        System.out.println(">> VERIFYING: " + request.provider() + " | KeyID: " + mask(cleanKey) + " | Len: " + cleanKey.length());
+        System.out.println(
+                ">> VERIFYING: " + request.provider() + " | KeyID: " + mask(cleanKey) + " | Len: " + cleanKey.length());
 
         try {
             return switch (request.provider()) {
@@ -42,14 +43,11 @@ public class ProviderVerifier {
 
     @SuppressWarnings("unchecked")
     private boolean verifyLambda(String key, String sshKeyName) {
-        // Lambda requires Basic Auth: username=key, password=""
-        String auth = "Basic " + Base64.getEncoder().encodeToString((key + ":").getBytes());
-
         try {
             // 1. List Keys
             Map<String, Object> response = restClient.get()
-                    .uri("https://cloud.lambdalabs.com/api/v1/ssh-keys")
-                    .header("Authorization", auth)
+                    .uri("https://cloud.lambda.ai/api/v1/ssh-keys")
+                    .header("Authorization", "Bearer " + key)
                     .retrieve()
                     .body(Map.class);
 
@@ -66,7 +64,7 @@ public class ProviderVerifier {
             if (!found) {
                 // List available keys to help user debug
                 List<String> keyNames = keys.stream()
-                        .map(k -> (String)k.get("name"))
+                        .map(k -> (String) k.get("name"))
                         .toList();
                 throw new RuntimeException("SSH Key '" + sshKeyName + "' not found. Your keys: " + keyNames);
             }
@@ -108,7 +106,8 @@ public class ProviderVerifier {
     }
 
     private String mask(String key) {
-        if (key == null || key.length() < 5) return "????";
+        if (key == null || key.length() < 5)
+            return "????";
         return "..." + key.substring(key.length() - 4);
     }
 }
