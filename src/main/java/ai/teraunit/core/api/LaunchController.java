@@ -1,7 +1,6 @@
 package ai.teraunit.core.api;
 
 import ai.teraunit.core.provisioning.ProvisioningService;
-import ai.teraunit.core.provisioning.VelocityFuse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
@@ -10,18 +9,12 @@ import org.springframework.web.bind.annotation.*;
 public class LaunchController {
 
     private final ProvisioningService service;
-    private final VelocityFuse fuse;
     private final ai.teraunit.core.security.ControlAuth controlAuth;
-    private final ai.teraunit.core.security.ClientIpResolver clientIpResolver;
 
     public LaunchController(ProvisioningService service,
-            VelocityFuse fuse,
-            ai.teraunit.core.security.ControlAuth controlAuth,
-            ai.teraunit.core.security.ClientIpResolver clientIpResolver) {
+            ai.teraunit.core.security.ControlAuth controlAuth) {
         this.service = service;
-        this.fuse = fuse;
         this.controlAuth = controlAuth;
-        this.clientIpResolver = clientIpResolver;
     }
 
     @PostMapping
@@ -30,11 +23,7 @@ public class LaunchController {
             // TRUST BOUNDARY: Control-plane token required
             controlAuth.requireControlToken(servletRequest);
 
-            // 1. PROTOCOL 13: VELOCITY FUSE
-            String ip = clientIpResolver.resolve(servletRequest);
-            fuse.check(ip);
-
-            // 2. EXECUTE
+            // EXECUTE
             return service.launch(request);
 
         } catch (SecurityException e) {

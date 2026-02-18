@@ -4,17 +4,20 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Component
 public class ControlAuth {
 
-    private final String controlToken;
+    private final List<String> controlTokens;
 
     public ControlAuth(@Value("${teraunit.control-token:}") String controlToken) {
-        this.controlToken = (controlToken == null) ? "" : controlToken;
+        this.controlTokens = parseTokens(controlToken);
     }
 
     public void requireControlToken(HttpServletRequest request) {
-        if (controlToken.isBlank()) {
+        if (controlTokens.isEmpty()) {
             throw new SecurityException("CONTROL_TOKEN_NOT_CONFIGURED");
         }
 
@@ -27,8 +30,32 @@ public class ControlAuth {
             }
         }
 
-        if (!TokenUtil.constantTimeEquals(controlToken, (provided == null) ? "" : provided.trim())) {
+        String candidate = (provided == null) ? "" : provided.trim();
+        boolean ok = false;
+        for (String token : controlTokens) {
+            ok |= TokenUtil.constantTimeEquals(token, candidate);
+        }
+
+        if (!ok) {
             throw new SecurityException("CONTROL_TOKEN_INVALID");
         }
+    }
+
+    private static List<String> parseTokens(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+
+        // Accept comma, newline, or space separated tokens.
+        String normalized = raw.replace('\n', ',').replace('\r', ',').replace(' ', ',').trim();
+        String[] parts = normalized.split(",");
+        List<String> tokens = new ArrayList<>();
+        for (String p : parts) {
+            String t = (p == null) ? "" : p.trim();
+            if (!t.isBlank()) {
+                tokens.add(t);
+            }
+        }
+        return List.copyOf(tokens);
     }
 }

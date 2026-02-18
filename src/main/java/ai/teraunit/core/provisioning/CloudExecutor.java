@@ -2,6 +2,7 @@ package ai.teraunit.core.provisioning;
 
 import ai.teraunit.core.api.LaunchRequest;
 import ai.teraunit.core.common.ProviderName;
+import ai.teraunit.core.security.TokenUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -25,20 +26,22 @@ public class CloudExecutor {
             String decryptedApiKey,
             String heartbeatId,
             String heartbeatToken) {
+        String cleanKey = TokenUtil.sanitizeApiKey(decryptedApiKey);
         return switch (request.provider()) {
-            case LAMBDA -> launchLambda(request, decryptedApiKey, heartbeatId, heartbeatToken);
-            case RUNPOD -> launchRunPod(request, decryptedApiKey, heartbeatId, heartbeatToken);
-            case VAST -> launchVast(request, decryptedApiKey, heartbeatId, heartbeatToken);
+            case LAMBDA -> launchLambda(request, cleanKey, heartbeatId, heartbeatToken);
+            case RUNPOD -> launchRunPod(request, cleanKey, heartbeatId, heartbeatToken);
+            case VAST -> launchVast(request, cleanKey, heartbeatId, heartbeatToken);
         };
     }
 
     public void terminate(String instanceId, ProviderName provider, String apiKey) {
         System.out.println("⚡ TERMINATING: " + instanceId + " on " + provider);
+        String cleanKey = TokenUtil.sanitizeApiKey(apiKey);
         try {
             switch (provider) {
-                case LAMBDA -> terminateLambda(instanceId, apiKey);
-                case RUNPOD -> terminateRunPod(instanceId, apiKey);
-                case VAST -> terminateVast(instanceId, apiKey);
+                case LAMBDA -> terminateLambda(instanceId, cleanKey);
+                case RUNPOD -> terminateRunPod(instanceId, cleanKey);
+                case VAST -> terminateVast(instanceId, cleanKey);
             }
         } catch (Exception e) {
             System.err.println("FAILED TO KILL " + instanceId + ": " + e.getMessage());
@@ -115,7 +118,7 @@ public class CloudExecutor {
 
             Map response = restClient.post()
                     .uri("https://api.runpod.io/graphql")
-                    .header("Authorization", key)
+                    .header("Authorization", "Bearer " + key)
                     .body(Map.of("query", query))
                     .retrieve()
                     .body(Map.class);
@@ -184,7 +187,7 @@ public class CloudExecutor {
         String query = String.format("mutation { podTerminate(input: { podId: \"%s\" }) }", id);
         restClient.post()
                 .uri("https://api.runpod.io/graphql")
-                .header("Authorization", key)
+                .header("Authorization", "Bearer " + key)
                 .body(Map.of("query", query))
                 .retrieve()
                 .toBodilessEntity();

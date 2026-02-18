@@ -58,6 +58,11 @@ public final class TokenUtil {
 
         // Also remove whitespace inside if it’s clearly accidental (newlines/tabs)
         cleaned = cleaned.replace("\r", "").replace("\n", "").replace("\t", "");
+
+        // Common copy/paste mistake: including the scheme prefix
+        if (cleaned.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            cleaned = cleaned.substring(7).trim();
+        }
         return cleaned;
     }
 
