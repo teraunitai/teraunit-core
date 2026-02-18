@@ -134,10 +134,17 @@ public class CloudExecutor {
 
     private String launchVast(LaunchRequest request, String key, String heartbeatId, String heartbeatToken) {
         try {
-            String endpoint = "https://console.vast.ai/api/v0/asks/" + request.instanceType() + "/";
+            String offerId = request.instanceType() == null ? null : request.instanceType().trim();
+            if (offerId == null || offerId.isBlank() || "null".equalsIgnoreCase(offerId) || !offerId.matches("\\d+")) {
+                throw new RuntimeException(
+                        "Missing/invalid Vast offer id (instanceType). Select a valid Vast offer from the pricing list.");
+            }
+
+            String endpoint = "https://console.vast.ai/api/v0/asks/" + offerId + "/";
 
             // Vast handles JSON body escaping well, so we pass raw script
             Map<String, Object> payload = Map.of(
+                    "id", offerId,
                     "client_id", "me",
                     "image", "pytorch/pytorch:2.0.1-cuda11.7-cudnn8-devel",
                     "onstart", generateHeartbeatScript(heartbeatId, heartbeatToken));
@@ -149,10 +156,14 @@ public class CloudExecutor {
                     .retrieve()
                     .body(Map.class);
 
+            if (response == null) {
+                throw new RuntimeException("Empty response from Vast.");
+            }
+
             if (Boolean.TRUE.equals(response.get("success"))) {
                 return "VAST::" + response.get("new_contract");
             }
-            throw new RuntimeException("VAST_ERR");
+            throw new RuntimeException("VAST_ERR: " + response);
         } catch (Exception e) {
             throw new RuntimeException("VAST_FAIL: " + e.getMessage());
         }
@@ -189,25 +200,41 @@ public class CloudExecutor {
 
     // TITANIUM POLYFILL: Works immediately without external binaries
     private String generateHeartbeatScript(String heartbeatId, String heartbeatToken) {
-        return """
-                #!/bin/bash
-                HEARTBEAT_ID="%s"
-                HEARTBEAT_TOKEN="%s"
-                SERVER="%s"
+        return String.format(
+                """
+                        #!/bin/bash
+                        HEARTBEAT_ID=\"%s\"
+                        HEARTBEAT_TOKEN=\"%s\"
+                        SERVER=\"%s\"
 
-                # 2. PERFORMANCE
-                swapoff -a
+                        # Zombie Kill Switch: If we cannot contact the server for >300s, halt.
+                        # Note: on container-based providers this may not power off the host.
+                        DEATH_TIMEOUT=300
+                        LAST_OK=$(date +%%s)
 
-                # 3. THE PULSE (Bash Implementation)
-                # Sends a heartbeat every 60 seconds using standard curl
-                while true; do
-                   curl -X POST "$SERVER" \\
-                     -H "Content-Type: application/json" \\
-                                     -H "X-Tera-Heartbeat-Token: $HEARTBEAT_TOKEN" \\
-                                     -d "{\\"id\\":\\"$HEARTBEAT_ID\\", \\\"status\\":\\"alive\\"}"
-                   sleep 60
-                done &
-                            """.formatted(heartbeatId, heartbeatToken, this.callbackUrl);
+                        # 2. PERFORMANCE
+                        swapoff -a
+
+                        # 3. THE PULSE
+                        while true; do
+                            if curl --silent --show-error --fail --max-time 10 -X POST \"$SERVER\" \\
+                                -H \"Content-Type: application/json\" \\
+                                -H \"X-Tera-Heartbeat-Token: $HEARTBEAT_TOKEN\" \\
+                                -d \"{\\\"id\\\":\\\"$HEARTBEAT_ID\\\",\\\"status\\\":\\\"alive\\\"}\"; then
+                                LAST_OK=$(date +%%s)
+                            fi
+
+                            NOW=$(date +%%s)
+                            if [ $((NOW - LAST_OK)) -gt $DEATH_TIMEOUT ]; then
+                                echo \"[TERA] Connection lost > ${DEATH_TIMEOUT}s. Executing kill switch.\" >&2
+                                (shutdown -h now 2>/dev/null || systemctl poweroff -i 2>/dev/null || poweroff -f 2>/dev/null || halt -f 2>/dev/null) || true
+                                exit 1
+                            fi
+
+                            sleep 60
+                        done &
+                        """,
+                heartbeatId, heartbeatToken, this.callbackUrl);
     }
 
     private String generateCloudInitUserData(String heartbeatId, String heartbeatToken) {
@@ -215,17 +242,18 @@ public class CloudExecutor {
         // The callback URL must be reachable from the instance.
         String script = generateHeartbeatScript(heartbeatId, heartbeatToken);
 
-        return """
-                #cloud-config
-                write_files:
-                    - path: /usr/local/bin/tera-heartbeat.sh
-                        permissions: '0755'
-                        owner: root:root
-                        content: |
-                %s
-                runcmd:
-                    - [ bash, -lc, "/usr/local/bin/tera-heartbeat.sh" ]
-                """.formatted(indentForCloudInit(script, 12));
+        // NOTE: build the YAML with explicit indentation to avoid formatter damage.
+        StringBuilder sb = new StringBuilder();
+        sb.append("#cloud-config\n");
+        sb.append("write_files:\n");
+        sb.append("  - path: /usr/local/bin/tera-heartbeat.sh\n");
+        sb.append("    permissions: '0755'\n");
+        sb.append("    owner: root:root\n");
+        sb.append("    content: |\n");
+        sb.append(indentForCloudInit(script, 6)).append("\n");
+        sb.append("runcmd:\n");
+        sb.append("  - [ bash, -lc, \"/usr/local/bin/tera-heartbeat.sh\" ]\n");
+        return sb.toString();
     }
 
     private static String indentForCloudInit(String content, int spaces) {

@@ -79,17 +79,33 @@ public class ProviderVerifier {
     }
 
     private boolean verifyRunPod(String key) {
-        String query = "{ user { id } }";
-        Map response = restClient.post()
-                .uri("https://api.runpod.io/graphql")
-                .header("Authorization", key)
-                .body(Map.of("query", query))
-                .retrieve()
-                .body(Map.class);
-        if (response != null && response.containsKey("errors")) {
-            throw new RuntimeException("RunPod Auth Failed: " + response.get("errors"));
+        // RunPod GraphQL schema uses `myself` (not `user`) for a whoami-style auth
+        // check.
+        String query = "query myself { myself { id } }";
+        try {
+            Map response = restClient.post()
+                    .uri("https://api.runpod.io/graphql")
+                    .header("Authorization", "Bearer " + key)
+                    .body(Map.of("query", query))
+                    .retrieve()
+                    .body(Map.class);
+
+            if (response == null) {
+                throw new RuntimeException("RunPod returned an empty response.");
+            }
+            if (response.containsKey("errors")) {
+                throw new RuntimeException("RunPod verification failed: " + response.get("errors"));
+            }
+            if (!response.containsKey("data")) {
+                throw new RuntimeException("RunPod returned no data field.");
+            }
+
+            return true;
+        } catch (HttpClientErrorException.Unauthorized e) {
+            throw new RuntimeException("RunPod API key rejected (401). Check for trailing spaces/newlines.");
+        } catch (HttpClientErrorException.Forbidden e) {
+            throw new RuntimeException("RunPod API key forbidden (403). Key may lack required permissions.");
         }
-        return true;
     }
 
     private boolean verifyVast(String key) {

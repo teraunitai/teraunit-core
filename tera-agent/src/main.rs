@@ -1,4 +1,5 @@
 use std::{thread, time, process};
+use std::process::Command;
 use sysinfo::{System, SystemExt, DiskExt};
 use std::time::{Instant, Duration};
 
@@ -44,6 +45,12 @@ fn main() {
     let client = reqwest::blocking::Client::new();
     let mut last_successful_pulse = Instant::now();
 
+    // Safety: avoid accidentally shutting down a developer machine.
+    // Set TERA_KILL_SWITCH_ARMED=true on real instances.
+    let kill_switch_armed = std::env::var("TERA_KILL_SWITCH_ARMED")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false);
+
     // 3. THE IMMORTAL LOOP
     loop {
         sys.refresh_memory();
@@ -83,9 +90,15 @@ fn main() {
             println!("[TERA-AGENT] 💀 CONNECTION LOST FOR {}s. EXECUTING KILL SWITCH.", time_since_contact);
             println!("[TERA-AGENT] 💸 SAVING USER WALLET. SHUTTING DOWN NOW.");
 
-            // SAFETY: In Dev, we panic. In Prod, uncomment the shutdown command.
-            // process::Command::new("shutdown").arg("-h").arg("now").spawn().expect("Failed to kill");
-            panic!("💀 ZOMBIE KILL SWITCH TRIGGERED (Simulation)");
+            if kill_switch_armed {
+                let _ = Command::new("shutdown").arg("-h").arg("now").spawn();
+                let _ = Command::new("systemctl").arg("poweroff").arg("-i").spawn();
+                let _ = Command::new("poweroff").arg("-f").spawn();
+                let _ = Command::new("halt").arg("-f").spawn();
+            }
+
+            // Always exit so the container/agent stops even if shutdown isn't permitted.
+            process::exit(42);
         }
 
         // Sleep 60s

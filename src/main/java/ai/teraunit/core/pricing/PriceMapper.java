@@ -25,11 +25,13 @@ public class PriceMapper {
                             Map<String, Object> item = (Map<String, Object>) val;
                             Map<String, Object> typeInfo = (Map<String, Object>) item.get("instance_type");
 
-                            if (typeInfo == null) return;
+                            if (typeInfo == null)
+                                return;
 
                             String name = (String) typeInfo.get("name");
                             Object priceObj = typeInfo.get("price_cents_per_hour");
-                            List<Map<String, Object>> regions = (List<Map<String, Object>>) item.get("regions_with_capacity_available");
+                            List<Map<String, Object>> regions = (List<Map<String, Object>>) item
+                                    .get("regions_with_capacity_available");
 
                             if (priceObj != null && regions != null && !regions.isEmpty()) {
                                 double price = ((Number) priceObj).doubleValue() / 100.0;
@@ -41,11 +43,11 @@ public class PriceMapper {
                                             name,
                                             price,
                                             (String) region.get("name"),
-                                            true
-                                    ));
+                                            true));
                                 }
                             }
-                        } catch (Exception e) { /* Skip */ }
+                        } catch (Exception e) {
+                            /* Skip */ }
                     });
                 }
             }
@@ -72,11 +74,11 @@ public class PriceMapper {
                                                 id,
                                                 price,
                                                 "GLOBAL", // RunPod allocates automatically
-                                                true
-                                        ));
+                                                true));
                                     }
                                 }
-                            } catch (Exception e) { /* Skip */ }
+                            } catch (Exception e) {
+                                /* Skip */ }
                         }
                     }
                 }
@@ -89,20 +91,35 @@ public class PriceMapper {
                 if (vastOffers != null) {
                     for (var offer : vastOffers) {
                         try {
-                            Double price = ((Number) offer.get("dph_total")).doubleValue();
-                            Object idObj = offer.get("id");
+                            Object dphObj = offer.get("dph_total");
+                            if (!(dphObj instanceof Number dphNum))
+                                continue;
+                            double price = dphNum.doubleValue();
 
-                            if (price > 0.01 && idObj != null) {
+                            Object idObj = offer.get("id");
+                            if (idObj == null || "null".equalsIgnoreCase(String.valueOf(idObj).trim())) {
+                                idObj = offer.get("ask_id");
+                            }
+                            if (idObj == null || "null".equalsIgnoreCase(String.valueOf(idObj).trim())) {
+                                idObj = offer.get("askId");
+                            }
+
+                            String id = idObj == null ? null : String.valueOf(idObj).trim();
+                            if (id == null || id.isBlank() || "null".equalsIgnoreCase(id) || !id.matches("\\d+")) {
+                                continue;
+                            }
+
+                            if (price > 0.01) {
                                 offers.add(new GpuOffer(
                                         ProviderName.VAST.name(),
                                         (String) offer.get("gpu_name"),
-                                        String.valueOf(idObj),
+                                        id,
                                         price,
                                         (String) offer.get("geolocation"),
-                                        true
-                                ));
+                                        true));
                             }
-                        } catch (Exception e) { /* Skip */ }
+                        } catch (Exception e) {
+                            /* Skip */ }
                     }
                 }
             }
