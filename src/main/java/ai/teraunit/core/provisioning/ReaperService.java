@@ -5,79 +5,65 @@ import ai.teraunit.core.security.KeyVaultService;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
-import java.util.Set;
+import ai.teraunit.core.repository.InstanceEntity;
+import ai.teraunit.core.repository.InstanceRepository;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 @Service
 public class ReaperService {
 
-    private final RedisTemplate<String, Object> redis;
+    private final InstanceRepository repository; // NEW: The Truth
     private final CloudExecutor executor;
     private final KeyVaultService vault;
 
-    // LEDGER KEY: Stores "PROVIDER::INSTANCE_ID::ENCRYPTED_KEY_REF"
-    private static final String LEDGER = "ACTIVE_DEPLOYMENTS";
-
-    public ReaperService(RedisTemplate<String, Object> redis, CloudExecutor executor, KeyVaultService vault) {
-        this.redis = redis;
+    public ReaperService(InstanceRepository repository, CloudExecutor executor, KeyVaultService vault) {
+        this.repository = repository;
         this.executor = executor;
         this.vault = vault;
     }
 
-    /**
-     * THE GRIM REAPER
-     * Runs every 60 seconds.
-     * Checks if any active deployment has lost its heartbeat for > 5 mins.
-     */
-    @Scheduled(fixedRate = 60000)
+    @Scheduled(fixedRate = 60000) // Run every minute
     public void reap() {
-        Set<Object> deployments = redis.opsForSet().members(LEDGER);
-        if (deployments == null) return;
+        // 1. Define "Dead" (No heartbeat for 5 minutes)
+        Instant cutoff = Instant.now().minus(5, ChronoUnit.MINUTES);
 
-        for (Object obj : deployments) {
-            String record = (String) obj;
-            // Format: PROVIDER::INSTANCE_ID::ENCRYPTED_KEY
-            String[] parts = record.split("::");
+        // 2. SQL Query for Zombies (Efficient)
+        List<InstanceEntity> zombies = repository.findZombies(cutoff);
 
-            if (parts.length != 3) continue;
+        for (InstanceEntity zombie : zombies) {
+            System.out.println("💀 ZOMBIE DETECTED: " + zombie.getInstanceId());
+            try {
+                // 3. Decrypt the Key
+                String realKey = vault.decrypt(zombie.getEncryptedApiKey());
 
-            String providerStr = parts[0];
-            String instanceId = parts[1];
-            String encryptedKey = parts[2];
+                // 4. Execute Kill Order
+                executor.terminate(zombie.getInstanceId(), zombie.getProvider(), realKey);
 
-            // Check Heartbeat
-            String heartbeatKey = "HEARTBEAT:" + instanceId;
-            if (!Boolean.TRUE.equals(redis.hasKey(heartbeatKey))) {
-                System.out.println("💀 ZOMBIE DETECTED: " + instanceId + ". KILLING...");
+                // 5. Mark Dead in Ledger
+                zombie.kill();
+                repository.save(zombie);
 
-                try {
-                    // 1. Kill on Cloud
-                    ProviderName provider = ProviderName.valueOf(providerStr);
-                    String realKey = vault.decrypt(encryptedKey);
-                    executor.terminate(instanceId, provider, realKey);
-
-                    // 2. Remove from Ledger
-                    redis.opsForSet().remove(LEDGER, record);
-                    System.out.println("💀 RIP: " + instanceId + " removed from ledger.");
-
-                } catch (Exception e) {
-                    System.err.println("FAILED TO REAP " + instanceId + ": " + e.getMessage());
-                }
+                System.out.println("💀 RIP: " + zombie.getInstanceId() + " terminated.");
+            } catch (Exception e) {
+                System.err.println("FAILED TO REAP " + zombie.getInstanceId() + ": " + e.getMessage());
             }
         }
     }
 
-    // Helper to register new births
-    public void registerBirth(String compositeId, String provider, String encryptedKey) {
-        // compositeId comes from Executor: "LAMBDA::12345"
-        // We need to parse it.
-        String[] parts = compositeId.split("::");
-        String realId = parts[1];
+    // Called by ProvisioningService
+    public void registerBirth(String instanceId, ProviderName provider, String encryptedKey) {
+        InstanceEntity entity = new InstanceEntity(instanceId, provider, encryptedKey);
+        repository.save(entity);
+    }
 
-        String record = provider + "::" + realId + "::" + encryptedKey;
-        redis.opsForSet().add(LEDGER, record);
-
-        // Seed the first heartbeat immediately so it doesn't die instantly
-        redis.opsForValue().set("HEARTBEAT:" + realId, "BORN", java.time.Duration.ofSeconds(300));
+    // Called by HeartbeatController
+    public void registerHeartbeat(String instanceId) {
+        InstanceEntity entity = repository.findByInstanceId(instanceId);
+        if (entity != null && entity.isActive()) {
+            entity.heartbeat();
+            repository.save(entity);
+        }
     }
 }

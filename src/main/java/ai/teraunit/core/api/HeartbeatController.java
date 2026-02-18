@@ -1,40 +1,33 @@
 package ai.teraunit.core.api;
 
-import org.springframework.data.redis.core.RedisTemplate;
+import ai.teraunit.core.provisioning.ReaperService;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Duration;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/heartbeat")
 public class HeartbeatController {
 
-    private final RedisTemplate<String, Object> redis;
+    private final ReaperService reaper;
 
-    public HeartbeatController(RedisTemplate<String, Object> redis) {
-        this.redis = redis;
+    // INJECTION: Wire the Reaper, not Redis directly.
+    public HeartbeatController(ReaperService reaper) {
+        this.reaper = reaper;
     }
 
     /**
-     * PROTOCOL 6: THE ZOMBIE KILL SWITCH (Receiver)
-     * <p>
-     * The Agent runs: curl -X POST /heartbeat -d '{"id":"i-123", "status":"alive"}'
-     * We store this pulse in Redis with a 300s (5 min) TTL.
-     * <p>
-     * If the key expires, the "Reaper" (Scheduled Task) assumes the
-     * instance is a Zombie and kills it via the Provider API.
+     * PROTOCOL 6: THE PULSE
+     * Updates the Immutable Ledger (PostgreSQL).
      */
     @PostMapping
     public void pulse(@RequestBody Map<String, String> payload) {
         String instanceId = payload.get("id");
         if (instanceId == null) return;
 
-        String key = "HEARTBEAT:" + instanceId;
+        System.out.println("[PULSE] Received from: " + instanceId);
 
-        // Extend life by 5 minutes
-        redis.opsForValue().set(key, "ALIVE", Duration.ofSeconds(300));
-
-        System.out.println("[PULSE] " + instanceId + " is active.");
+        // UPDATE THE LEDGER OF TRUTH
+        reaper.registerHeartbeat(instanceId);
     }
 }

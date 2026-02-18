@@ -1,13 +1,15 @@
 package ai.teraunit.core.provisioning;
 
 import ai.teraunit.core.api.LaunchRequest;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
-@Service
+@Component
 public class ProviderVerifier {
 
     private final RestClient restClient;
@@ -16,64 +18,97 @@ public class ProviderVerifier {
         this.restClient = restClient;
     }
 
-    public boolean verify(LaunchRequest request, String decryptedKey) {
-        // SECURITY PATCH: NEVER log the full key. Only log the last 4 chars or a hash.
-        String mask = (decryptedKey != null && decryptedKey.length() > 4)
-                ? "..." + decryptedKey.substring(decryptedKey.length() - 4)
-                : "INVALID";
+    public boolean verify(LaunchRequest request, String apiKey) {
+        // SANITIZATION PROTOCOL: Remove invisible spaces/newlines
+        String cleanKey = (apiKey != null) ? apiKey.trim() : "";
 
-        System.out.println(">> VERIFYING: " + request.provider() + " | KeyID: " + mask);
+        System.out.println(">> VERIFYING: " + request.provider() + " | KeyID: " + mask(cleanKey) + " | Len: " + cleanKey.length());
 
         try {
             return switch (request.provider()) {
-                case LAMBDA -> verifyLambda(decryptedKey);
-                case RUNPOD -> verifyRunPod(decryptedKey);
-                case VAST -> verifyVast(decryptedKey);
+                case LAMBDA -> verifyLambda(cleanKey, request.sshKeyName());
+                case RUNPOD -> verifyRunPod(cleanKey);
+                case VAST -> verifyVast(cleanKey);
             };
         } catch (Exception e) {
             System.err.println("!! VERIFICATION FAILED !!");
             System.err.println("Provider: " + request.provider());
-            // SECURITY PATCH: Do not print e.getMessage() if it might contain the key from the URL/Header dump
-            System.err.println("Error Type: " + e.getClass().getSimpleName());
+            System.err.println("Error: " + e.getMessage());
             return false;
         }
     }
 
-    private boolean verifyLambda(String key) {
+    // --- PROVIDER CHECKS ---
+
+    @SuppressWarnings("unchecked")
+    private boolean verifyLambda(String key, String sshKeyName) {
+        // Lambda requires Basic Auth: username=key, password=""
         String auth = "Basic " + Base64.getEncoder().encodeToString((key + ":").getBytes());
-        restClient.get()
-                .uri("https://cloud.lambdalabs.com/api/v1/user/info")
-                .header("Authorization", auth)
-                .retrieve()
-                .toBodilessEntity();
-        return true;
+
+        try {
+            // 1. List Keys
+            Map<String, Object> response = restClient.get()
+                    .uri("https://cloud.lambdalabs.com/api/v1/ssh-keys")
+                    .header("Authorization", auth)
+                    .retrieve()
+                    .body(Map.class);
+
+            if (response == null || !response.containsKey("data")) {
+                throw new RuntimeException("Lambda returned invalid SSH Key data.");
+            }
+
+            // 2. Filter by Name
+            List<Map<String, Object>> keys = (List<Map<String, Object>>) response.get("data");
+
+            boolean found = keys.stream()
+                    .anyMatch(k -> sshKeyName.equals(k.get("name")));
+
+            if (!found) {
+                // List available keys to help user debug
+                List<String> keyNames = keys.stream()
+                        .map(k -> (String)k.get("name"))
+                        .toList();
+                throw new RuntimeException("SSH Key '" + sshKeyName + "' not found. Your keys: " + keyNames);
+            }
+
+            return true;
+
+        } catch (HttpClientErrorException.Unauthorized e) {
+            throw new RuntimeException("Invalid API Key (401). Check for trailing spaces.");
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new RuntimeException("Lambda API Endpoint Not Found (Check URL).");
+        }
     }
 
     private boolean verifyRunPod(String key) {
-        String query = "{ myself { id } }";
+        String query = "{ user { id } }";
         Map response = restClient.post()
                 .uri("https://api.runpod.io/graphql")
-                .header("Authorization", key) // RunPod API Key usually passed directly
+                .header("Authorization", key)
                 .body(Map.of("query", query))
                 .retrieve()
                 .body(Map.class);
-
         if (response != null && response.containsKey("errors")) {
-            throw new RuntimeException("RunPod Refusal");
+            throw new RuntimeException("RunPod Auth Failed: " + response.get("errors"));
         }
         return true;
     }
 
     private boolean verifyVast(String key) {
-        Map response = restClient.get()
-                .uri("https://console.vast.ai/api/v0/users/current/")
-                .header("Authorization", "Bearer " + key)
-                .retrieve()
-                .body(Map.class);
-
-        if (response == null || !Boolean.TRUE.equals(response.get("success"))) {
-            throw new RuntimeException("Vast Refusal");
+        try {
+            restClient.get()
+                    .uri("https://console.vast.ai/api/v0/users/current/")
+                    .header("Authorization", "Bearer " + key)
+                    .retrieve()
+                    .toBodilessEntity();
+            return true;
+        } catch (HttpClientErrorException e) {
+            throw new RuntimeException("Vast Auth Failed: " + e.getStatusCode());
         }
-        return true;
+    }
+
+    private String mask(String key) {
+        if (key == null || key.length() < 5) return "????";
+        return "..." + key.substring(key.length() - 4);
     }
 }

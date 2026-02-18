@@ -72,23 +72,23 @@ public class ProvisioningService {
         // EXECUTION & REGISTRATION
         // ---------------------------------------------------------
 
-        // 1. Execute the API Call (Returns "PROVIDER::INSTANCE_ID")
+        // Inside provision() method...
+
+        // 1. Execute
         String compositeId = executor.provision(request, request.apiKey());
 
         // 2. PROTOCOL 6: REGISTER BIRTH
-        // We encrypt the key again for storage so the Reaper can use it later
-        // to kill the instance without needing the user to be online.
         String storageKey = vault.encrypt(request.apiKey());
 
-        // Parse the ID from the composite string "PROVIDER::ID"
         String[] parts = compositeId.split("::");
         if (parts.length == 2) {
-            // Register: "LAMBDA::12345" -> Ledger
-            reaper.registerBirth(compositeId, parts[0], storageKey);
-        } else {
-            System.err.println("[CRITICAL] Failed to register birth for: " + compositeId);
-        }
+            // Convert "LAMBDA" string to Enum
+            ProviderName provider = ProviderName.valueOf(parts[0]);
+            String realId = parts[1];
 
+            // Save to DB
+            reaper.registerBirth(realId, provider, storageKey);
+        }
         return "SUCCESS: " + compositeId;
     }
 

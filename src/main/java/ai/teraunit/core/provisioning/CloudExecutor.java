@@ -178,26 +178,26 @@ public class CloudExecutor {
                 .toBodilessEntity();
     }
 
-    // SCRIPT GENERATOR
+    // TITANIUM POLYFILL: Works immediately without external binaries
     private String generateScript() {
         return """
             #!/bin/bash
-            echo "[TERAUNIT] 🚀 BOOT SEQUENCE INITIATED..."
-            SERVER="%s"
+            # 1. IDENTITY
             ID=$(hostname)
+            SERVER="%s"
             
-            # 1. CHECK FOR BINARY (Future Phase)
-            if [ -f /root/tera-agent ]; then
-                echo "[TERAUNIT] ✅ Binary Found."
-                chmod +x /root/tera-agent && /root/tera-agent &
-            else
-                echo "[TERAUNIT] ⚠️ Engaging Bash Polyfill."
-                # 2. BASH POLYFILL (Current Safety Net)
-                while true; do
-                    curl -X POST "$SERVER" -H "Content-Type: application/json" -d "{\\"id\\":\\"$ID\\", \\"status\\":\\"alive\\"}"
-                    sleep 60
-                done &
-            fi
+            # 2. PERFORMANCE
+            swapoff -a
+            
+            # 3. THE PULSE (Bash Implementation)
+            # Sends a heartbeat every 60 seconds using standard curl
+            while true; do
+               curl -X POST "$SERVER" \\
+                 -H "Content-Type: application/json" \\
+                 -d "{\\"id\\":\\"$ID\\", \\"status\\":\\"alive\\"}"
+               sleep 60
+            done &
             """.formatted(this.callbackUrl);
     }
+
 }

@@ -35,18 +35,26 @@ public class LaunchController {
             // PROVIDER ERROR TRANSLATION LAYER
             String msg = e.getMessage().toLowerCase();
 
-            // Map raw API errors to Human Readable text
+            // --- 1. FUNDS ---
             if (msg.contains("balance") || msg.contains("funds") || msg.contains("credit")) {
                 return "FAILED: INSUFFICIENT FUNDS (Check Provider Account)";
             }
+            // --- 2. QUOTA ---
             if (msg.contains("quota") || msg.contains("limit") || msg.contains("capacity")) {
                 return "FAILED: PROVIDER QUOTA EXCEEDED";
             }
+            // --- 3. AUTH ---
             if (msg.contains("unauthorized") || msg.contains("401") || msg.contains("403") || msg.contains("auth")) {
                 return "FAILED: INVALID API KEY";
             }
-            if (msg.contains("unavailable") || msg.contains("stock") || msg.contains("sold out")) {
-                return "FAILED: INSTANCE NO LONGER AVAILABLE";
+            // --- 4. INVENTORY (The Fix for RunPod) ---
+            // Catches "SUPPLY_CONSTRAINT", "no longer any instances", "sold out", "unavailable"
+            if (msg.contains("supply_constraint") ||
+                    msg.contains("no longer") ||
+                    msg.contains("unavailable") ||
+                    msg.contains("stock") ||
+                    msg.contains("sold out")) {
+                return "FAILED: SOLD OUT (Race Condition)";
             }
 
             // Fallback: Log the full nasty error to Console, show simplified version to User
