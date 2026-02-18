@@ -1,17 +1,12 @@
 package ai.teraunit.core.provisioning;
 
-import ai.teraunit.core.common.ProviderName;
+import ai.teraunit.core.api.LaunchRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
-import java.util.Map;
-import java.util.Base64;
 
-/**
- * THE BUREAUCRACY BYPASS (PROTOCOL 5)
- *
- * Purpose: Prevents "Silent Failures" by checking Cloud Quotas BEFORE taking money.
- * Target: AWS Service Quotas, Lambda Account Info, Vast Verification.
- */
+import java.util.Base64;
+import java.util.Map;
+
 @Service
 public class ProviderVerifier {
 
@@ -21,59 +16,64 @@ public class ProviderVerifier {
         this.restClient = restClient;
     }
 
-    public boolean checkQuota(ProviderName provider, String apiKey, String gpuType) {
+    public boolean verify(LaunchRequest request, String decryptedKey) {
+        // SECURITY PATCH: NEVER log the full key. Only log the last 4 chars or a hash.
+        String mask = (decryptedKey != null && decryptedKey.length() > 4)
+                ? "..." + decryptedKey.substring(decryptedKey.length() - 4)
+                : "INVALID";
+
+        System.out.println(">> VERIFYING: " + request.provider() + " | KeyID: " + mask);
+
         try {
-            return switch (provider) {
-                case LAMBDA -> verifyLambdaQuota(apiKey);
-                case RUNPOD -> verifyRunPodBalance(apiKey);
-                case VAST -> true; // Vast is P2P, usually no quota limits, checks done at bid time
-                default -> false;
+            return switch (request.provider()) {
+                case LAMBDA -> verifyLambda(decryptedKey);
+                case RUNPOD -> verifyRunPod(decryptedKey);
+                case VAST -> verifyVast(decryptedKey);
             };
         } catch (Exception e) {
-            System.err.println("[TeraUnit-Verifier] Quota Check Failed: " + e.getMessage());
+            System.err.println("!! VERIFICATION FAILED !!");
+            System.err.println("Provider: " + request.provider());
+            // SECURITY PATCH: Do not print e.getMessage() if it might contain the key from the URL/Header dump
+            System.err.println("Error Type: " + e.getClass().getSimpleName());
             return false;
         }
     }
 
-    private boolean verifyLambdaQuota(String apiKey) {
-        // Lambda Labs: Check 'account' endpoint for instance limits
-        try {
-            String authHeader = "Basic " + Base64.getEncoder()
-                    .encodeToString((apiKey + ":").getBytes());
-
-            var response = restClient.get()
-                    .uri("https://cloud.lambdalabs.com/api/v1/user/info")
-                    .header("Authorization", authHeader)
-                    .retrieve()
-                    .toBodilessEntity();
-
-            return response.getStatusCode().is2xxSuccessful();
-        } catch (Exception e) {
-            return false; // Invalid Key or API Down
-        }
+    private boolean verifyLambda(String key) {
+        String auth = "Basic " + Base64.getEncoder().encodeToString((key + ":").getBytes());
+        restClient.get()
+                .uri("https://cloud.lambdalabs.com/api/v1/user/info")
+                .header("Authorization", auth)
+                .retrieve()
+                .toBodilessEntity();
+        return true;
     }
 
-    private boolean verifyRunPodBalance(String apiKey) {
-        // RunPod: Check if user has > $5.00 balance
-        String query = "{ user { funds } }";
-        try {
-            Map response = restClient.post()
-                    .uri("https://api.runpod.io/graphql")
-                    .header("Authorization", "Bearer " + apiKey)
-                    .body(Map.of("query", query))
-                    .retrieve()
-                    .body(Map.class);
+    private boolean verifyRunPod(String key) {
+        String query = "{ myself { id } }";
+        Map response = restClient.post()
+                .uri("https://api.runpod.io/graphql")
+                .header("Authorization", key) // RunPod API Key usually passed directly
+                .body(Map.of("query", query))
+                .retrieve()
+                .body(Map.class);
 
-            if (response != null && response.containsKey("data")) {
-                Map data = (Map) response.get("data");
-                Map user = (Map) data.get("user");
-                Object fundsObj = user.get("funds");
-                double funds = Double.parseDouble(fundsObj.toString());
-                return funds > 5.00; // VELOCITY FUSE (Protocol 13 Lite)
-            }
-            return false;
-        } catch (Exception e) {
-            return false;
+        if (response != null && response.containsKey("errors")) {
+            throw new RuntimeException("RunPod Refusal");
         }
+        return true;
+    }
+
+    private boolean verifyVast(String key) {
+        Map response = restClient.get()
+                .uri("https://console.vast.ai/api/v0/users/current/")
+                .header("Authorization", "Bearer " + key)
+                .retrieve()
+                .body(Map.class);
+
+        if (response == null || !Boolean.TRUE.equals(response.get("success"))) {
+            throw new RuntimeException("Vast Refusal");
+        }
+        return true;
     }
 }

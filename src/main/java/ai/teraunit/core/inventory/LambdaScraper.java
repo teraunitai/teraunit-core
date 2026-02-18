@@ -1,39 +1,43 @@
 package ai.teraunit.core.inventory;
 
-import ai.teraunit.core.common.GpuPriceScrapedEvent;
 import ai.teraunit.core.common.ProviderName;
+import ai.teraunit.core.pricing.GpuOffer;
+import ai.teraunit.core.pricing.PriceMapper;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 @Component
 public class LambdaScraper implements GpuProviderScraper {
 
     private final RestClient restClient;
-    private final ApplicationEventPublisher publisher;
+    private final RedisTemplate<String, Object> redis; // Added DB Access
+    private final PriceMapper priceMapper;             // Added Mapper Access
 
     @Value("${LAMBDA_API_KEY:missing_key}")
     private String apiKey;
 
-    public LambdaScraper(RestClient restClient, ApplicationEventPublisher publisher) {
+    public LambdaScraper(RestClient restClient,
+                         RedisTemplate<String, Object> redis,
+                         PriceMapper priceMapper) {
         this.restClient = restClient;
-        this.publisher = publisher;
+        this.redis = redis;
+        this.priceMapper = priceMapper;
     }
 
     @Override
     @Scheduled(fixedRate = 60000)
     public void scrape() {
         try {
-            // Lambda Labs requires Basic Auth: base64("API_KEY:")
             String authHeader = "Basic " + Base64.getEncoder()
                     .encodeToString((apiKey + ":").getBytes());
 
-            // Correct Lambda Labs pricing endpoint
             String endpoint = "https://cloud.lambdalabs.com/api/v1/instance-types";
 
             @SuppressWarnings("unchecked")
@@ -44,16 +48,18 @@ public class LambdaScraper implements GpuProviderScraper {
                     .body(Map.class);
 
             if (response != null) {
-                publisher.publishEvent(
-                        new GpuPriceScrapedEvent(ProviderName.LAMBDA, response)
-                );
-                System.out.println("[TeraUnit-Pulse] Lambda pricing scraped successfully.");
-            } else {
-                System.err.println("[TeraUnit-Warn] Lambda returned null response.");
+                // 1. Use the Mapper we just fixed
+                List<GpuOffer> offers = priceMapper.mapToOffers(ProviderName.LAMBDA, response);
+
+                // 2. Save DIRECTLY to Redis (Fixing the "Depleted" issue)
+                if (!offers.isEmpty()) {
+                    redis.opsForValue().set("CLEAN_OFFERS:LAMBDA", offers);
+                    System.out.println("[TeraUnit-Pulse] Lambda Updated: " + offers.size() + " units online.");
+                }
             }
 
         } catch (Exception e) {
-            System.err.println("[TeraUnit-Error] Lambda Scrape Failed: " + e.getMessage());
+            System.err.println("[TeraUnit-Warn] Lambda Scrape Retry: " + e.getMessage());
         }
     }
 }

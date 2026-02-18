@@ -4,22 +4,18 @@
     <meta charset="UTF-8">
     <title>TeraUnit | Global Compute Index</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <meta http-equiv="refresh" content="60"> <!-- Auto-refresh every 60s -->
+    <!-- Auto-refresh backup if JS fails -->
+    <meta http-equiv="refresh" content="60">
     <style>
-        /* Custom Scrollbar for Industrial Feel */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #111827;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #374151;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #4B5563;
-        }
+        /* INDUSTRIAL THEME: SCROLLBARS */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #111827; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4B5563; }
+
+        /* MODAL TRANSITIONS */
+        .modal { transition: opacity 0.25s ease; }
+        body.modal-active { overflow-x: hidden; overflow-y: hidden !important; }
     </style>
 </head>
 <body class="bg-gray-900 text-white font-mono min-h-screen flex flex-col">
@@ -27,7 +23,6 @@
 <div class="container mx-auto p-8 flex-grow">
     <!-- HEADER -->
     <div class="flex items-center gap-5 mb-10 border-b border-gray-800 pb-6">
-        <!-- Logo: MUST BE IN src/main/resources/static/logo.png -->
         <img src="/logo.svg" alt="TeraUnit Logo" class="w-16 h-16 object-contain">
         <div>
             <h1 class="text-4xl font-bold text-white tracking-tighter leading-none">
@@ -46,7 +41,7 @@
             </span>
             System Online
         </div>
-        <div id="last-updated">Updating...</div>
+        <div id="last-updated">Initializing Link...</div>
     </div>
 
     <!-- PRICING GRID -->
@@ -59,42 +54,125 @@
     </div>
 </div>
 
+<!-- DEPLOY MODAL (PHASE 4 LOGIC) -->
+<div id="deploy-modal" class="modal opacity-0 pointer-events-none fixed w-full h-full top-0 left-0 flex items-center justify-center z-50">
+    <div class="modal-overlay absolute w-full h-full bg-gray-900 opacity-90"></div>
+
+    <div class="modal-container bg-gray-800 w-11/12 md:max-w-md mx-auto rounded shadow-lg z-50 overflow-y-auto border border-green-500/30">
+        <div class="modal-content py-4 text-left px-6">
+
+            <!-- Title -->
+            <div class="flex justify-between items-center pb-3 border-b border-gray-700">
+                <p class="text-2xl font-bold text-green-400" id="modal-title">DEPLOY UNIT</p>
+                <div class="modal-close cursor-pointer z-50 hover:text-red-500 transition-colors" onclick="toggleModal()">
+                    <svg class="fill-current text-white" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+                        <path d="M14.53 4.53l-1.06-1.06L9 7.94 4.53 3.47 3.47 4.53 7.94 9l-4.47 4.47 1.06 1.06L9 10.06l4.47 4.47 1.06-1.06L10.06 9z"></path>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Deployment Form -->
+            <div class="my-5 space-y-4">
+                <!-- PROTOCOL 17: THE ID BRIDGE (HIDDEN) -->
+                <input type="hidden" id="deploy-provider">
+                <input type="hidden" id="deploy-gpu"> <!-- Holds LaunchID (e.g. "115910") -->
+                <input type="hidden" id="deploy-region">
+
+                <div>
+                    <label class="block text-gray-400 text-xs uppercase mb-1">Target Region</label>
+                    <input type="text" id="input-region" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-green-500 outline-none font-mono text-sm" readonly>
+                </div>
+
+                <div>
+                    <label class="block text-gray-400 text-xs uppercase mb-1">API Key (Provider Own)</label>
+                    <input type="password" id="input-key" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-green-500 outline-none font-mono" placeholder="sk_live_...">
+                    <p class="text-[10px] text-gray-500 mt-1">Key is encrypted (AES-256) & never logged.</p>
+                </div>
+
+                <div>
+                    <label class="block text-gray-400 text-xs uppercase mb-1">SSH Key Name</label>
+                    <input type="text" id="input-ssh" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-green-500 outline-none font-mono" placeholder="default">
+                </div>
+
+                <!-- LOGIC ENGINE INPUTS (EGRESS GUARD) -->
+                <div class="p-3 bg-gray-900 rounded border border-gray-700">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="text-[10px] text-green-500 uppercase font-bold">ROI Calculator (Egress Guard)</div>
+                        <div class="text-[9px] text-gray-500 cursor-help border-b border-dotted border-gray-500" title="Calculates if moving your data is profitable based on AWS egress fees ($0.09/GB). If cost to move > savings, the launch is blocked.">What is this?</div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-gray-500 text-[10px] uppercase mb-1">Dataset Size (GB)</label>
+                            <input type="number" id="input-dataset" value="0"
+                                   class="w-full bg-gray-800 border border-gray-600 rounded p-1 text-white text-sm focus:border-green-500 outline-none"
+                                   placeholder="0">
+                            <p class="text-[8px] text-gray-600 mt-1">Leave 0 if no data to move.</p>
+                        </div>
+                        <div>
+                            <label class="block text-gray-500 text-[10px] uppercase mb-1">Current GPU Cost ($/hr)</label>
+                            <input type="number" id="input-cost" value="0.00"
+                                   class="w-full bg-gray-800 border border-gray-600 rounded p-1 text-white text-sm focus:border-green-500 outline-none"
+                                   placeholder="0.00">
+                            <p class="text-[8px] text-gray-600 mt-1">Your price to beat.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Status Output -->
+                <div id="deploy-status" class="text-xs text-center min-h-[20px] text-gray-400 font-bold break-words"></div>
+            </div>
+
+            <!-- Footer -->
+            <div class="flex justify-end pt-2">
+                <button onclick="executeLaunch()" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded font-bold w-full transition-colors text-sm tracking-wide shadow-lg shadow-green-900/50">
+                    INITIATE LAUNCH
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- FOOTER -->
 <footer class="border-t border-gray-800 py-6 mt-8 text-center">
     <p class="text-gray-600 text-xs">TERAUNIT AI &copy; 2026 // INFRASTRUCTURE BROKERAGE</p>
 </footer>
 
 <script>
+    let isDeploying = false;
+
+    // --- CORE POLL LOOP ---
     async function fetchPrices() {
+        if(isDeploying) return; // Pause updates while user types
+
         try {
             const res = await fetch('/v1/pricing');
             const data = await res.json();
             const container = document.getElementById('ticker');
             container.innerHTML = '';
 
-            // Update Timestamp
+            // Timestamp
             const now = new Date();
-            document.getElementById('last-updated').innerText = "LAST SYNC: " + now.toLocaleTimeString();
+            document.getElementById('last-updated').innerText = "SYNC: " + now.toLocaleTimeString();
 
-            // PROVIDER LOGIC
-            const providers = ['lambda', 'runpod', 'vast']; // Enforce order
-
-            providers.forEach(provider => {
+            // Enforce Provider Order for Consistency
+            ['lambda', 'runpod', 'vast'].forEach(provider => {
                 const offers = data[provider] || [];
 
-                // CARD CONTAINER
-                let html = `<div class="bg-gray-800 border border-gray-700 p-5 rounded-lg shadow-lg hover:border-gray-600 transition-colors duration-300">`;
+                // 1. Card Container
+                let html = `<div class="bg-gray-800 border border-gray-700 p-5 rounded-lg shadow-lg hover:border-gray-600 transition-colors duration-300 flex flex-col h-full">`;
 
-                // CARD HEADER
+                // 2. Header
                 html += `<div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-3">
                             <h2 class="text-xl font-bold text-white">${provider.toUpperCase()}</h2>
-                            <span class="text-xs font-bold px-2 py-1 rounded ${offers.length > 0 ? 'bg-green-900/50 text-green-400' : 'bg-red-900/20 text-red-500'}">
-                                ${offers.length > 0 ? 'ACTIVE' : 'OFFLINE'}
-                            </span>
+                            <div class="text-xs font-bold px-2 py-1 rounded ${offers.length > 0 ? 'bg-green-900/50 text-green-400' : 'bg-red-900/20 text-red-500'}">
+                                ${offers.length > 0 ? offers.length + ' UNITS' : 'OFFLINE'}
+                            </div>
                          </div>`;
 
+                // 3. Content
                 if (offers.length === 0) {
-                    // SOLD OUT STATE (Corrects the Lambda Issue)
+                    // RESTORED AESTHETIC: The Clean Empty State
                     html += `<div class="text-center py-12">
                                 <svg class="w-10 h-10 mx-auto mb-3 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
@@ -103,47 +181,163 @@
                                 <p class="text-xs text-gray-600 mt-1">No spot instances available.</p>
                              </div>`;
                 } else {
-                    // DATA TABLE
+                    // THE "PHASE 4" FUNCTIONAL LIST
                     html += `<div class="overflow-y-auto max-h-[500px] pr-2 space-y-2">`;
 
                     // Sort: Price Low -> High
                     offers.sort((a, b) => a.pricePerHour - b.pricePerHour);
 
                     offers.slice(0, 12).forEach(offer => {
-                        // Highlight High-Value Cards (H100, 4090, 5090)
-                        const isHot = ['H100', '5090', '4090'].some(model => offer.gpuModel.includes(model));
-                        const highlightClass = isHot ? 'text-white' : 'text-gray-400';
+                        // Aesthetic: Highlight High-Value Hardware
+                        const isHot = ['H100', 'A100', '4090', '5090'].some(model =>
+                            offer.gpuModel.toUpperCase().includes(model)
+                        );
+                        const highlightClass = isHot ? 'text-white font-bold' : 'text-gray-400 font-medium';
 
-                        html += `<div class="flex justify-between items-center p-2 rounded hover:bg-gray-700/50 group">
+                        // Escaping for JS safety
+                        const safeModel = offer.gpuModel.replace(/"/g, '&quot;');
+                        const safeRegion = (offer.region || 'GLOBAL').replace(/"/g, '&quot;');
+                        // Protocol 17: The Critical ID
+                        const launchId = offer.launchId;
+
+                        html += `<div class="flex justify-between items-center p-2 rounded hover:bg-gray-700/50 group cursor-pointer border border-transparent hover:border-gray-600"
+                                      onclick="openModal('${provider}', '${safeModel}', '${safeRegion}', '${launchId}')">
                                     <div class="flex flex-col">
-                                        <span class="text-sm font-medium ${highlightClass} group-hover:text-white">${offer.gpuModel}</span>
-                                        ${offer.region ? `<span class="text-[10px] text-gray-600 uppercase">${offer.region}</span>` : ''}
+                                        <span class="text-sm ${highlightClass} group-hover:text-white transition-colors">${offer.gpuModel}</span>
+                                        <span class="text-[10px] text-gray-600 uppercase">${offer.region || 'GLOBAL'}</span>
                                     </div>
-                                    <span class="font-mono font-bold text-green-400">$${offer.pricePerHour.toFixed(3)}<span class="text-xs text-gray-600">/hr</span></span>
+                                    <div class="text-right">
+                                        <span class="font-mono font-bold text-green-400 block">$${offer.pricePerHour.toFixed(3)}</span>
+                                        <span class="text-[10px] text-green-600 group-hover:text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">DEPLOY &rarr;</span>
+                                    </div>
                                  </div>`;
                     });
-                    html += `</div>`;
 
+                    // Overflow indicator
                     if(offers.length > 12) {
                         html += `<div class="mt-3 pt-2 border-t border-gray-700 text-center text-xs text-gray-500">
                                     + ${offers.length - 12} more items
                                  </div>`;
                     }
+
+                    html += `</div>`;
                 }
                 html += `</div>`;
                 container.innerHTML += html;
             });
         } catch (e) {
-            console.error("Feed lost", e);
-            // Keep the old data on screen if update fails, just log error
+            console.error("Ticker Error:", e);
+            // Don't wipe the screen on error, just stop updating
+        }
+    }
+
+    // --- MODAL CONTROLS ---
+
+    function toggleModal() {
+        const body = document.querySelector('body');
+        const modal = document.querySelector('#deploy-modal');
+        modal.classList.toggle('opacity-0');
+        modal.classList.toggle('pointer-events-none');
+        body.classList.toggle('modal-active');
+        isDeploying = !isDeploying;
+    }
+
+    function openModal(provider, model, region, launchId) {
+        document.getElementById('modal-title').innerText = `DEPLOY ${model}`;
+        document.getElementById('deploy-provider').value = provider.toUpperCase();
+        // INJECTION: The ID Bridge
+        document.getElementById('deploy-gpu').value = launchId;
+
+        document.getElementById('deploy-region').value = region;
+        document.getElementById('input-region').value = region;
+
+        // Reset State
+        document.getElementById('deploy-status').innerText = "";
+        document.getElementById('deploy-status').className = "text-xs text-center min-h-[20px] text-gray-400 font-bold break-words";
+
+        toggleModal();
+    }
+
+    async function executeLaunch() {
+        const statusDiv = document.getElementById('deploy-status');
+        const btn = document.querySelector('button');
+
+        // 1. GATHER DATA
+        const payload = {
+            provider: document.getElementById('deploy-provider').value,
+            apiKey: document.getElementById('input-key').value,
+            instanceType: document.getElementById('deploy-gpu').value, // The Secret ID
+            region: document.getElementById('deploy-region').value,
+            sshKeyName: document.getElementById('input-ssh').value,
+            // Logic Engine Inputs
+            datasetSizeGb: parseInt(document.getElementById('input-dataset').value) || 0,
+            currentGpuHourlyCost: parseFloat(document.getElementById('input-cost').value) || 0.0,
+            sourceRegion: "us-east-1" // Defaulting for MVP
+        };
+
+        // 2. VALIDATION
+        if (!payload.apiKey) {
+            statusDiv.innerText = "ERROR: API KEY REQUIRED";
+            statusDiv.classList.add("text-red-500");
+            return;
+        }
+
+        // 3. UI LOCK
+        statusDiv.innerText = "HANDSHAKE INITIATED...";
+        statusDiv.className = "text-xs text-center min-h-[20px] text-yellow-400 font-bold animate-pulse";
+        btn.disabled = true;
+        btn.classList.add("opacity-50", "cursor-not-allowed");
+
+        try {
+            // 4. EXECUTE
+            const res = await fetch('/v1/launch', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+
+            const result = await res.text();
+            statusDiv.classList.remove("animate-pulse");
+
+            if (result.includes("SUCCESS")) {
+                // HAPPY PATH
+                statusDiv.innerText = "DEPLOYMENT CONFIRMED.";
+                statusDiv.className = "text-xs text-center min-h-[20px] text-green-400 font-bold";
+
+                setTimeout(() => {
+                    alert("UNIT ONLINE: " + result);
+                    toggleModal();
+                    // Unlock UI
+                    btn.disabled = false;
+                    btn.classList.remove("opacity-50", "cursor-not-allowed");
+                }, 500);
+            } else {
+                // REJECTION PATH (SAFETY PATCH APPLIED)
+                // Use the message from Backend. If it's huge (stack trace), cut it.
+                let cleanMsg = result;
+                if (cleanMsg.length > 100) {
+                    console.error("FULL ERROR:", cleanMsg);
+                    cleanMsg = "ERROR: PROVIDER REJECTED REQUEST (See Console)";
+                }
+
+                statusDiv.innerText = cleanMsg;
+                statusDiv.className = "text-xs text-center min-h-[20px] text-red-500 font-bold";
+
+                btn.disabled = false;
+                btn.classList.remove("opacity-50", "cursor-not-allowed");
+            }
+        } catch (e) {
+            statusDiv.innerText = "NETWORK FAILURE";
+            statusDiv.className = "text-xs text-center min-h-[20px] text-red-500 font-bold";
+            btn.disabled = false;
+            btn.classList.remove("opacity-50", "cursor-not-allowed");
         }
     }
 
     // Initial Load
     fetchPrices();
-
-    // Poll every 60s (Redundant backup to meta-refresh)
-    setInterval(fetchPrices, 60000);
+    // Poll every 10s
+    setInterval(fetchPrices, 10000);
 </script>
 </body>
 </html>

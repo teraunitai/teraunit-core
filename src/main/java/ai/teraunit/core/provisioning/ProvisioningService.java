@@ -1,8 +1,12 @@
 package ai.teraunit.core.provisioning;
 
 import ai.teraunit.core.api.LaunchRequest;
+import ai.teraunit.core.common.ProviderName;
+import ai.teraunit.core.pricing.GpuOffer;
 import ai.teraunit.core.security.KeyVaultService;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import java.util.List;
 
 @Service
 public class ProvisioningService {
@@ -10,43 +14,114 @@ public class ProvisioningService {
     private final KeyVaultService vault;
     private final ProviderVerifier verifier;
     private final EgressGuard egressGuard;
-    private final CloudExecutor executor; // <--- NEW DEPENDENCY
+    private final CloudExecutor executor;
+    private final ReaperService reaper; // PROTOCOL 6: THE EXECUTIONER LINK
+    private final RedisTemplate<String, Object> redis;
 
     public ProvisioningService(KeyVaultService vault,
                                ProviderVerifier verifier,
                                EgressGuard egressGuard,
-                               CloudExecutor executor) {
+                               CloudExecutor executor,
+                               ReaperService reaper,
+                               RedisTemplate<String, Object> redis) {
         this.vault = vault;
         this.verifier = verifier;
         this.egressGuard = egressGuard;
         this.executor = executor;
+        this.reaper = reaper;
+        this.redis = redis;
     }
 
     public String launch(LaunchRequest request) {
 
-        // 1. SOVEREIGNTY CHECK
-        if (request.region().startsWith("eu-") && !isEuCompliant(request)) {
-            throw new SecurityException("SOVEREIGNTY_VIOLATION: EU Data cannot leave the zone.");
+        // ---------------------------------------------------------
+        // PROTOCOL 12: SOVEREIGNTY SWITCH (GDPR/Compliance)
+        // ---------------------------------------------------------
+        if (!isSovereigntyCompliant(request.sourceRegion(), request.region())) {
+            throw new SecurityException("SOVEREIGNTY_VIOLATION: Data transfer between EU and Non-EU zones is prohibited.");
         }
 
-        // 2. QUOTA CHECK
-        boolean hasQuota = verifier.checkQuota(request.provider(), request.apiKey(), request.instanceType());
-        if (!hasQuota) {
-            return "FAILED: QUOTA_EXCEEDED";
+        // ---------------------------------------------------------
+        // PROTOCOL 5: BUREAUCRACY BYPASS (Quota & Auth)
+        // ---------------------------------------------------------
+        boolean isVerified = verifier.verify(request, request.apiKey());
+
+        if (!isVerified) {
+            return "FAILED: QUOTA_EXCEEDED_OR_AUTH_FAILURE";
         }
 
-        // 3. ENCRYPTION (Audit Log)
-        // We encrypt the key to log that "User X launched Instance Y" securely.
-        String encryptedKey = vault.encrypt(request.apiKey());
+        // ---------------------------------------------------------
+        // PROTOCOL 10: EGRESS GUARD (Profitability)
+        // ---------------------------------------------------------
+        double targetPrice = fetchCurrentPrice(request.provider(), request.instanceType());
 
-        // 4. EXECUTION (The Real Deal)
-        // We pass the raw key to the executor to make the purchase.
-        String result = executor.provision(request, request.apiKey());
+        // Only check profitability if we have valid cost data
+        if (targetPrice > 0 && request.currentGpuHourlyCost() > 0) {
+            boolean isProfitable = egressGuard.isSafeToMove(
+                    targetPrice,
+                    request.currentGpuHourlyCost(),
+                    request.datasetSizeGb()
+            );
 
-        return result + " | Vault Ref: " + encryptedKey.substring(0, 8);
+            if (!isProfitable) {
+                throw new SecurityException("EGRESS_BLOCK: This move loses money. Stay where you are.");
+            }
+        }
+
+        // ---------------------------------------------------------
+        // EXECUTION & REGISTRATION
+        // ---------------------------------------------------------
+
+        // 1. Execute the API Call (Returns "PROVIDER::INSTANCE_ID")
+        String compositeId = executor.provision(request, request.apiKey());
+
+        // 2. PROTOCOL 6: REGISTER BIRTH
+        // We encrypt the key again for storage so the Reaper can use it later
+        // to kill the instance without needing the user to be online.
+        String storageKey = vault.encrypt(request.apiKey());
+
+        // Parse the ID from the composite string "PROVIDER::ID"
+        String[] parts = compositeId.split("::");
+        if (parts.length == 2) {
+            // Register: "LAMBDA::12345" -> Ledger
+            reaper.registerBirth(compositeId, parts[0], storageKey);
+        } else {
+            System.err.println("[CRITICAL] Failed to register birth for: " + compositeId);
+        }
+
+        return "SUCCESS: " + compositeId;
     }
 
-    private boolean isEuCompliant(LaunchRequest request) {
-        return true;
+    /**
+     * Checks if the Source and Target regions are legally compatible.
+     */
+    private boolean isSovereigntyCompliant(String source, String target) {
+        if (source == null || source.isEmpty()) return true;
+        boolean sourceEu = source.toLowerCase().startsWith("eu-");
+        boolean targetEu = target.toLowerCase().startsWith("eu-");
+        return sourceEu == targetEu;
+    }
+
+    /**
+     * Looks up the real-time price from the Scraper Cache.
+     */
+    @SuppressWarnings("unchecked")
+    private double fetchCurrentPrice(ProviderName provider, String instanceType) {
+        try {
+            List<GpuOffer> offers = (List<GpuOffer>) redis.opsForValue().get("CLEAN_OFFERS:" + provider);
+            if (offers == null) return 0.0;
+
+            return offers.stream()
+                    // Relaxed matching for MVP (contains instead of exact equals)
+                    .filter(o -> o.gpuModel().toUpperCase().contains(instanceType.toUpperCase())
+                            || instanceType.toUpperCase().contains(o.gpuModel().toUpperCase()))
+                    .mapToDouble(GpuOffer::pricePerHour)
+                    .min()
+                    .orElse(0.0);
+        } catch (Exception e) {
+            // Log generic error to avoid leaking sensitive context
+            System.err.println("[Pricing] Failed to lookup target price.");
+            return 0.0;
+        }
     }
 }
