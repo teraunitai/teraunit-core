@@ -83,6 +83,33 @@
           <div class="text-gray-500 text-sm">Connecting to Redis Cloud...</div>
         </div>
       </div>
+
+      <!-- ACTIVE INSTANCES (MANUAL STOP) -->
+      <div class="mt-10 border-t border-gray-800 pt-6">
+        <div class="flex justify-between items-center mb-3">
+          <div class="text-xs text-gray-500 uppercase tracking-wider">
+            Active Units
+          </div>
+          <button
+            onclick="refreshInstances()"
+            class="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded font-bold text-xs border border-gray-700"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div
+          id="instances-status"
+          class="text-xs text-gray-500 mb-2 min-h-[16px]"
+        ></div>
+
+        <div
+          id="instances"
+          class="border border-gray-800 rounded-lg bg-gray-800/30 overflow-x-auto"
+        >
+          <div class="p-4 text-xs text-gray-600">No data loaded.</div>
+        </div>
+      </div>
     </div>
 
     <!-- DEPLOY MODAL (PHASE 4 LOGIC) -->
@@ -258,6 +285,155 @@
 
         localStorage.setItem(key, token);
         return token;
+      }
+
+      function escapeAttr(str) {
+        return (str || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function fmtInstant(iso) {
+        if (!iso) return "-";
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return "-";
+        return d.toLocaleString();
+      }
+
+      async function refreshInstances() {
+        const status = document.getElementById("instances-status");
+        const box = document.getElementById("instances");
+
+        const controlToken = getControlToken();
+        if (!controlToken) {
+          status.innerText = "ERROR: INVITE CODE REQUIRED";
+          status.className = "text-xs text-red-500 mb-2 min-h-[16px] font-bold";
+          return;
+        }
+
+        status.innerText = "SYNCING ACTIVE UNITS...";
+        status.className =
+          "text-xs text-yellow-400 mb-2 min-h-[16px] font-bold animate-pulse";
+
+        try {
+          const res = await fetch("/v1/instances", {
+            headers: {
+              "X-Tera-Control-Token": controlToken,
+            },
+          });
+
+          if (!res.ok) {
+            const t = await res.text();
+            throw new Error(t || "HTTP " + res.status);
+          }
+
+          const data = await res.json();
+          status.classList.remove("animate-pulse");
+          status.innerText = `ACTIVE: ${data.length}`;
+          status.className = "text-xs text-gray-500 mb-2 min-h-[16px]";
+
+          if (!data || data.length === 0) {
+            box.innerHTML =
+              '<div class="p-4 text-xs text-gray-600">No active instances.</div>';
+            return;
+          }
+
+          let html =
+            '<table class="w-full text-xs"><thead class="text-gray-500 uppercase tracking-wider"><tr class="border-b border-gray-800">' +
+            '<th class="text-left p-3">Provider</th>' +
+            '<th class="text-left p-3">Instance</th>' +
+            '<th class="text-left p-3">Last Heartbeat</th>' +
+            '<th class="text-left p-3">Lease Expires</th>' +
+            '<th class="text-right p-3">Action</th>' +
+            "</tr></thead><tbody>";
+
+          data.forEach((row) => {
+            const provider = escapeAttr(row.provider);
+            const instanceId = escapeAttr(row.instanceId);
+            const heartbeatId = escapeAttr(row.heartbeatId);
+
+            html +=
+              '<tr class="border-b border-gray-800/60 hover:bg-gray-800/40">' +
+              `<td class="p-3 text-gray-300 font-bold">${provider}</td>` +
+              `<td class="p-3 text-gray-300 font-mono">${instanceId}</td>` +
+              `<td class="p-3 text-gray-400">${fmtInstant(row.lastHeartbeat)}</td>` +
+              `<td class="p-3 text-gray-400">${fmtInstant(row.expiresAt)}</td>` +
+              '<td class="p-3 text-right">' +
+              `<button onclick="terminateInstance('${heartbeatId}')" class="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded font-bold text-[11px]">STOP</button>` +
+              "</td>" +
+              "</tr>";
+          });
+
+          html += "</tbody></table>";
+          box.innerHTML = html;
+        } catch (e) {
+          console.error("Instances Error:", e);
+          status.classList.remove("animate-pulse");
+          status.innerText = "ERROR: FAILED TO LOAD (See Console)";
+          status.className = "text-xs text-red-500 mb-2 min-h-[16px] font-bold";
+        }
+      }
+
+      async function terminateInstance(heartbeatId) {
+        const status = document.getElementById("instances-status");
+
+        const controlToken = getControlToken();
+        if (!controlToken) {
+          status.innerText = "ERROR: INVITE CODE REQUIRED";
+          status.className = "text-xs text-red-500 mb-2 min-h-[16px] font-bold";
+          return;
+        }
+
+        if (!heartbeatId || heartbeatId.trim() === "") {
+          status.innerText = "ERROR: MISSING HEARTBEAT ID";
+          status.className = "text-xs text-red-500 mb-2 min-h-[16px] font-bold";
+          return;
+        }
+
+        if (!confirm("Terminate this instance now?")) {
+          return;
+        }
+
+        status.innerText = "SENDING KILL ORDER...";
+        status.className =
+          "text-xs text-yellow-400 mb-2 min-h-[16px] font-bold animate-pulse";
+
+        try {
+          const res = await fetch("/v1/instances/terminate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Tera-Control-Token": controlToken,
+            },
+            body: JSON.stringify({ heartbeatId }),
+          });
+
+          const txt = await res.text();
+          status.classList.remove("animate-pulse");
+
+          if (txt.includes("CONTROL_TOKEN_INVALID")) {
+            localStorage.removeItem("teraunit_control_token");
+          }
+
+          if (txt.startsWith("TERMINATED")) {
+            status.innerText = txt;
+            status.className =
+              "text-xs text-green-400 mb-2 min-h-[16px] font-bold";
+            await refreshInstances();
+            return;
+          }
+
+          status.innerText = txt || "ERROR: TERMINATION FAILED";
+          status.className = "text-xs text-red-500 mb-2 min-h-[16px] font-bold";
+        } catch (e) {
+          console.error("Terminate Error:", e);
+          status.classList.remove("animate-pulse");
+          status.innerText = "NETWORK FAILURE";
+          status.className = "text-xs text-red-500 mb-2 min-h-[16px] font-bold";
+        }
       }
 
       // --- CORE POLL LOOP ---
@@ -458,6 +634,7 @@
 
             setTimeout(() => {
               alert("UNIT ONLINE: " + result);
+              refreshInstances();
               toggleModal();
               // Unlock UI
               btn.disabled = false;

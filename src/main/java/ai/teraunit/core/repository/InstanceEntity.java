@@ -6,7 +6,8 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "tera_instances", indexes = {
-        @Index(name = "idx_active_heartbeat", columnList = "isActive, lastHeartbeat")
+        @Index(name = "idx_active_heartbeat", columnList = "isActive, lastHeartbeat"),
+        @Index(name = "idx_active_expiry", columnList = "isActive, expiresAt")
 })
 public class InstanceEntity {
 
@@ -37,6 +38,9 @@ public class InstanceEntity {
 
     @Column(nullable = false)
     private Instant startTime;
+
+    // Optional: hard stop even if heartbeats continue (prevents weekend leaks)
+    private Instant expiresAt;
 
     private Instant lastHeartbeat;
 
@@ -100,6 +104,18 @@ public class InstanceEntity {
 
     public String getEncryptedApiKey() {
         return encryptedApiKey;
+    }
+
+    public Instant getStartTime() {
+        return startTime;
+    }
+
+    public Instant getExpiresAt() {
+        return expiresAt;
+    }
+
+    public void setExpiresAt(Instant expiresAt) {
+        this.expiresAt = expiresAt;
     }
 
     public Instant getLastHeartbeat() {
