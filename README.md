@@ -40,12 +40,14 @@ The hosted control plane endpoints are gated by a control token.
 ## Local run (dev)
 
 Requirements:
-- Java 21
+
+- Java 21 (ensure `java -version` shows 21; set `JAVA_HOME` accordingly)
 - Maven
 - Postgres
 - Redis
 
 Environment variables (common):
+
 - `TERA_CONTROL_TOKEN`
 - `TERA_VAULT_KEY` (base64-encoded AES key material)
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`
@@ -57,6 +59,9 @@ Run:
 
 ```bash
 ./mvnw spring-boot:run
+
+# Windows PowerShell:
+.\mvnw.cmd spring-boot:run
 ```
 
 ## Notes
