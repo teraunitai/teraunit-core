@@ -35,6 +35,9 @@ build/
 # VS Code local history (can contain old code/config snapshots)
 .history/
 
+# Local git bundle backups (safety exports)
+*.bundle
+
 # Add these to the bottom of your .gitignore
 .env
 .DS_Store
