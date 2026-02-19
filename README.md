@@ -1,12 +1,24 @@
-# TeraUnit Core
+# TeraUnit (Alpha)
 
-TeraUnit is a bring-your-own-provider-key control plane for launching, listing, and terminating GPU instances across multiple providers.
+**Status:** Phase-5 Closed Alpha (Red Team)
 
-This repo contains the Spring Boot backend (`teraunit-core`). It is intended for a closed alpha where access to the hosted control plane is gated.
+> **Disclaimer: No free compute.**
+> TeraUnit is a **Bring-Your-Own-Key (BYOK)** orchestrator.
+> You are billed directly by your provider (Lambda / RunPod / Vast) at their standard rates.
+> This project is orchestration + safety tooling only.
+
+## The problem: zombie instances
+
+GPU instances can keep running (and billing) after the control plane loses contact (agent crash, networking/DNS issues, bad auth token, etc.).
+
+TeraUnit adds a safety harness:
+
+- Instances periodically send authenticated check-ins to the control plane.
+- If check-ins stop for long enough, the control plane terminates the instance to stop the billing clock.
 
 ## What it does (today)
 
-- Launch GPU instances on supported providers (BYO-key)
+- Launch GPU instances on supported providers (BYOK)
 - List active instances
 - Terminate instances manually
 - Automatically terminates instances that go silent ("zombie" protection)
@@ -14,24 +26,24 @@ This repo contains the Spring Boot backend (`teraunit-core`). It is intended for
 
 ## Key handling (accurate)
 
-- Provider API keys are stored **AES-GCM encrypted at rest**.
-- Keys are stored solely so the server can terminate instances later (reaper/manual stop) even if the browser closes.
-- Keys are never meant to be logged or displayed.
+- **Encrypted at rest:** provider API keys are stored using **AES-GCM**.
+- **Purpose-bound:** keys are persisted solely so the server can terminate instances later (reaper/manual stop) even if your browser/session closes.
+- **No logging/UI:** keys are not meant to be logged or displayed.
 
 ## Access model (Phase 5)
 
-The control plane endpoints are gated by a control token.
+The hosted control plane endpoints are gated by a control token.
 
 - Provide the token via `X-Tera-Control-Token` header (or `Authorization: Bearer ...`).
 - Without the token, `/v1/launch` and `/v1/instances/*` are blocked.
 
-## Local run (minimal)
+## Local run (dev)
 
 Requirements:
 - Java 21
 - Maven
-- Postgres (or set JPA to a local dev setup)
-- Redis (for offer cache)
+- Postgres
+- Redis
 
 Environment variables (common):
 - `TERA_CONTROL_TOKEN`
