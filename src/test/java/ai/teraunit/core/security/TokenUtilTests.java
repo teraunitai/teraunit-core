@@ -20,4 +20,12 @@ class TokenUtilTests {
         assertEquals("abcDEF123", TokenUtil.sanitizeApiKey("abcDEF123;"));
         assertEquals("abcDEF123", TokenUtil.sanitizeApiKey("abc DEF\t123"));
     }
+
+    @Test
+    void sanitizeHumanIdentifier_normalizesWhitespaceAndDashes() {
+        assertEquals("teraunit-sshkey-test", TokenUtil.sanitizeHumanIdentifier("teraunit-sshkey-test"));
+        assertEquals("teraunit-sshkey-test", TokenUtil.sanitizeHumanIdentifier("teraunit\u2013sshkey\u2011test"));
+        assertEquals("teraunit-sshkey-test", TokenUtil.sanitizeHumanIdentifier(" teraunit-sshkey-test\u00A0"));
+        assertEquals("teraunit sshkey test", TokenUtil.sanitizeHumanIdentifier("teraunit  sshkey\n\t test"));
+    }
 }

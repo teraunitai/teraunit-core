@@ -94,6 +94,37 @@ public final class TokenUtil {
         return cleaned;
     }
 
+    /**
+     * Sanitizes a human-typed identifier (e.g., SSH key name).
+     * Unlike API keys, these may legitimately contain spaces, so we:
+     * - remove invisible/control chars
+     * - normalize non-breaking spaces
+     * - normalize common Unicode dash variants to '-'
+     * - trim and collapse repeated whitespace
+     */
+    public static String sanitizeHumanIdentifier(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        String cleaned = value.replaceAll("[\\p{Cc}\\p{Cf}]", "");
+        cleaned = cleaned.replace('\u00A0', ' '); // NBSP
+
+        // Normalize common Unicode dashes to ASCII '-'
+        cleaned = cleaned
+                .replace('\u2010', '-')
+                .replace('\u2011', '-')
+                .replace('\u2012', '-')
+                .replace('\u2013', '-')
+                .replace('\u2014', '-')
+                .replace('\u2015', '-')
+                .replace('\u2212', '-');
+
+        cleaned = cleaned.trim();
+        cleaned = cleaned.replaceAll("\\s+", " ");
+        return cleaned;
+    }
+
     private static String toHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);
         for (byte b : bytes) {

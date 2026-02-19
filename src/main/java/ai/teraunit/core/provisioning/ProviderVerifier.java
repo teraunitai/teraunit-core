@@ -44,6 +44,8 @@ public class ProviderVerifier {
     @SuppressWarnings("unchecked")
     private boolean verifyLambda(String key, String sshKeyName) {
         try {
+            String cleanSshKeyName = ai.teraunit.core.security.TokenUtil.sanitizeHumanIdentifier(sshKeyName);
+
             // 1. List Keys
             Map<String, Object> response = restClient.get()
                     .uri("https://cloud.lambda.ai/api/v1/ssh-keys")
@@ -59,14 +61,14 @@ public class ProviderVerifier {
             List<Map<String, Object>> keys = (List<Map<String, Object>>) response.get("data");
 
             boolean found = keys.stream()
-                    .anyMatch(k -> sshKeyName.equals(k.get("name")));
+                    .anyMatch(k -> cleanSshKeyName.equals(k.get("name")));
 
             if (!found) {
                 // List available keys to help user debug
                 List<String> keyNames = keys.stream()
                         .map(k -> (String) k.get("name"))
                         .toList();
-                throw new RuntimeException("SSH Key '" + sshKeyName + "' not found. Your keys: " + keyNames);
+                throw new RuntimeException("SSH Key '" + cleanSshKeyName + "' not found. Your keys: " + keyNames);
             }
 
             return true;

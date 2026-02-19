@@ -54,6 +54,8 @@ public class CloudExecutor {
         try {
             String endpoint = "https://cloud.lambda.ai/api/v1/instance-operations/launch";
 
+            String cleanSshKeyName = TokenUtil.sanitizeHumanIdentifier(request.sshKeyName());
+
             // cloud-init user_data is supported by Lambda Cloud API
             String userData = generateCloudInitUserData(heartbeatId, heartbeatToken);
 
@@ -61,7 +63,7 @@ public class CloudExecutor {
             Map<String, Object> payload = Map.of(
                     "region_name", request.region(),
                     "instance_type_name", request.instanceType(),
-                    "ssh_key_names", new String[] { request.sshKeyName() },
+                    "ssh_key_names", new String[] { cleanSshKeyName },
                     "quantity", 1,
                     "name", "teraunit-worker-" + System.currentTimeMillis(),
                     "user_data", userData);
