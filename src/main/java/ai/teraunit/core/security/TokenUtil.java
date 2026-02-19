@@ -77,9 +77,19 @@ public final class TokenUtil {
             break;
         }
 
+        // Also strip surrounding backticks (Markdown / chat copy)
+        while (cleaned.length() >= 2 && cleaned.startsWith("`") && cleaned.endsWith("`")) {
+            cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
+        }
+
         // Tokens should never contain whitespace; remove any accidental
         // spaces/newlines/tabs.
         cleaned = cleaned.replaceAll("\\s+", "");
+
+        // Strip common wrappers and trailing punctuation from copy/paste
+        cleaned = cleaned.replaceAll("^[<\\[\\(\\{]+", "");
+        cleaned = cleaned.replaceAll("[>\\]\\)\\}]+$", "");
+        cleaned = cleaned.replaceAll("[\\.,;:]+$", "");
 
         return cleaned;
     }
