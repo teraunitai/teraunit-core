@@ -11,25 +11,63 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 @Service
 public class KeyVaultService {
 
-    private static final int AES_KEY_SIZE = 256;
     private static final int GCM_IV_LENGTH = 12;
     private static final int GCM_TAG_LENGTH = 128;
 
     @Value("${TERA_VAULT_KEY}")
-    private String base64Key;
+    private String base64KeysRaw;
 
-    private SecretKey masterKey;
+    private SecretKey primaryKey;
+    private List<SecretKey> allKeys;
 
     @PostConstruct
     public void init() {
-        // Decodes the Master Key from application.properties
-        byte[] decodedKey = Base64.getDecoder().decode(base64Key);
-        this.masterKey = new SecretKeySpec(decodedKey, "AES");
+        List<String> keys = parseKeyList(base64KeysRaw);
+        if (keys.isEmpty()) {
+            throw new SecurityException("VAULT_KEY_NOT_CONFIGURED");
+        }
+
+        List<SecretKey> decodedKeys = new ArrayList<>(keys.size());
+        for (String b64 : keys) {
+            try {
+                byte[] decoded = Base64.getDecoder().decode(b64);
+                if (decoded.length != 32) {
+                    throw new SecurityException("VAULT_KEY_INVALID_LENGTH");
+                }
+                decodedKeys.add(new SecretKeySpec(decoded, "AES"));
+            } catch (IllegalArgumentException e) {
+                throw new SecurityException("VAULT_KEY_INVALID_BASE64");
+            }
+        }
+
+        this.allKeys = List.copyOf(decodedKeys);
+        this.primaryKey = this.allKeys.getFirst();
+    }
+
+    private static List<String> parseKeyList(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+
+        // Support rotation by allowing a comma/semicolon/newline separated list:
+        //   TERA_VAULT_KEY="<newB64>,<oldB64>"
+        String normalized = raw.replace('\r', ',').replace('\n', ',').replace(';', ',').trim();
+        String[] parts = normalized.split(",");
+        List<String> out = new ArrayList<>(parts.length);
+        for (String p : parts) {
+            String t = (p == null) ? "" : p.trim();
+            if (!t.isBlank()) {
+                out.add(t);
+            }
+        }
+        return List.copyOf(out);
     }
 
     public String encrypt(String plainText) {
@@ -39,7 +77,7 @@ public class KeyVaultService {
 
             final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-            cipher.init(Cipher.ENCRYPT_MODE, masterKey, spec);
+            cipher.init(Cipher.ENCRYPT_MODE, primaryKey, spec);
 
             byte[] cipherText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
 
@@ -55,23 +93,35 @@ public class KeyVaultService {
     }
 
     public String decrypt(String encryptedPayload) {
+        byte[] decoded;
         try {
-            byte[] decoded = Base64.getDecoder().decode(encryptedPayload);
-
-            ByteBuffer byteBuffer = ByteBuffer.wrap(decoded);
-            byte[] iv = new byte[GCM_IV_LENGTH];
-            byteBuffer.get(iv);
-
-            byte[] cipherText = new byte[byteBuffer.remaining()];
-            byteBuffer.get(cipherText);
-
-            final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-            cipher.init(Cipher.DECRYPT_MODE, masterKey, spec);
-
-            return new String(cipher.doFinal(cipherText), StandardCharsets.UTF_8);
+            decoded = Base64.getDecoder().decode(encryptedPayload);
         } catch (Exception e) {
             throw new SecurityException("VAULT_ACCESS_DENIED: Integrity Check Failed");
         }
+
+        ByteBuffer byteBuffer = ByteBuffer.wrap(decoded);
+        if (byteBuffer.remaining() < GCM_IV_LENGTH + 1) {
+            throw new SecurityException("VAULT_ACCESS_DENIED: Integrity Check Failed");
+        }
+
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        byteBuffer.get(iv);
+
+        byte[] cipherText = new byte[byteBuffer.remaining()];
+        byteBuffer.get(cipherText);
+
+        for (SecretKey candidateKey : allKeys) {
+            try {
+                final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+                cipher.init(Cipher.DECRYPT_MODE, candidateKey, spec);
+                return new String(cipher.doFinal(cipherText), StandardCharsets.UTF_8);
+            } catch (Exception ignored) {
+                // Try next key.
+            }
+        }
+
+        throw new SecurityException("VAULT_ACCESS_DENIED: Integrity Check Failed");
     }
 }
