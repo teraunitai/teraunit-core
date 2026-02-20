@@ -13,7 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
 
-
 @Service
 public class KeyVaultService {
 
