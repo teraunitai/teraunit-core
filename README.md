@@ -51,7 +51,7 @@ Requirements:
 Environment variables (common):
 
 - `TERA_CONTROL_TOKEN`
-- `TERA_VAULT_KEY` (base64-encoded AES key material)
+- `TERA_VAULT_KEY` (32-byte AES key material; base64 or 64-char hex)
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`
 - `JDBC_DATABASE_URL`, `JDBC_DATABASE_USERNAME`, `JDBC_DATABASE_PASSWORD`
 - `TERA_CALLBACK_URL`
