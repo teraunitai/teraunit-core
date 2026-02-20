@@ -24,6 +24,8 @@ TeraUnit adds a safety harness:
 - Automatically terminates instances that go silent ("zombie" protection)
 - Optional hard stop lease (max runtime) to prevent surprise weekend spend
 
+![Terminal Screenshot](docs/terminal-screenshot.png)
+
 ## Key handling (accurate)
 
 - **Encrypted at rest:** provider API keys are stored using **AES-GCM**.
