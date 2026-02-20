@@ -18,37 +18,77 @@ public class PriceMapper {
             // 1. LAMBDA LABS
             // ---------------------------------------------------------
             if (provider == ProviderName.LAMBDA) {
-                Map<String, Object> data = (Map<String, Object>) rawData.get("data");
-                if (data != null) {
-                    data.forEach((key, val) -> {
-                        try {
-                            Map<String, Object> item = (Map<String, Object>) val;
-                            Map<String, Object> typeInfo = (Map<String, Object>) item.get("instance_type");
+                Object dataObj = rawData.get("data");
+                if (dataObj != null) {
+                    // Lambda responses have been seen with `data` as either a Map keyed by instance
+                    // type
+                    // or a List of entries. Support both.
+                    List<?> entries;
+                    if (dataObj instanceof Map<?, ?> dataMap) {
+                        entries = new ArrayList<>(dataMap.values());
+                    } else if (dataObj instanceof List<?> dataList) {
+                        entries = dataList;
+                    } else {
+                        entries = List.of();
+                    }
 
-                            if (typeInfo == null)
-                                return;
+                    for (Object entry : entries) {
+                        try {
+                            if (!(entry instanceof Map<?, ?> itemAny)) {
+                                continue;
+                            }
+                            Map<String, Object> item = (Map<String, Object>) itemAny;
+
+                            // Some shapes nest under `instance_type`, others put fields at top level.
+                            Object typeObj = item.get("instance_type");
+                            Map<String, Object> typeInfo = (typeObj instanceof Map<?, ?> m)
+                                    ? (Map<String, Object>) m
+                                    : item;
 
                             String name = (String) typeInfo.get("name");
-                            Object priceObj = typeInfo.get("price_cents_per_hour");
-                            List<Map<String, Object>> regions = (List<Map<String, Object>>) item
-                                    .get("regions_with_capacity_available");
-
-                            if (priceObj != null && regions != null && !regions.isEmpty()) {
-                                double price = ((Number) priceObj).doubleValue() / 100.0;
-
-                                for (Map<String, Object> region : regions) {
-                                    offers.add(new GpuOffer(
-                                            ProviderName.LAMBDA.name(),
-                                            name.toUpperCase(),
-                                            name,
-                                            price,
-                                            (String) region.get("name"),
-                                            true));
-                                }
+                            if (name == null || name.isBlank()) {
+                                continue;
                             }
+
+                            Object priceObj = typeInfo.get("price_cents_per_hour");
+                            if (!(priceObj instanceof Number priceNum)) {
+                                continue;
+                            }
+                            double price = priceNum.doubleValue() / 100.0;
+
+                            Object regionsObj = item.get("regions_with_capacity_available");
+                            if (regionsObj == null) {
+                                regionsObj = typeInfo.get("regions_with_capacity_available");
+                            }
+                            if (!(regionsObj instanceof List<?> regions) || regions.isEmpty()) {
+                                continue;
+                            }
+
+                            for (Object r : regions) {
+                                String regionName = null;
+                                if (r instanceof Map<?, ?> rm) {
+                                    Object rn = ((Map<?, ?>) rm).get("name");
+                                    regionName = rn == null ? null : String.valueOf(rn);
+                                } else if (r instanceof String rs) {
+                                    regionName = rs;
+                                }
+                                if (regionName == null || regionName.isBlank()) {
+                                    continue;
+                                }
+
+                                offers.add(new GpuOffer(
+                                        ProviderName.LAMBDA.name(),
+                                        name.toUpperCase(),
+                                        name,
+                                        price,
+                                        regionName,
+                                        true));
+                            }
+
                         } catch (Exception e) {
-                            /* Skip */ }
-                    });
+                            /* Skip */
+                        }
+                    }
                 }
             }
             // ---------------------------------------------------------
