@@ -1,6 +1,6 @@
 # TeraUnit (Alpha)
 
-**Status:** Phase-5 Closed Alpha (Red Team)
+**Status:** Closed Alpha
 
 > **Disclaimer: No free compute.**
 > TeraUnit is a **Bring-Your-Own-Key (BYOK)** orchestrator.
@@ -32,7 +32,7 @@ TeraUnit adds a safety harness:
 - **Purpose-bound:** keys are persisted solely so the server can terminate instances later (reaper/manual stop) even if your browser/session closes.
 - **No logging/UI:** keys are not meant to be logged or displayed.
 
-## Access model (Phase 5)
+## Access model
 
 The hosted control plane endpoints are gated by a control token.
 
