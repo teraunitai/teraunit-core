@@ -35,6 +35,10 @@ public class ProvisioningService {
 
     public String launch(LaunchRequest request) {
 
+        // Always sanitize API keys at the trust boundary.
+        // This avoids hidden whitespace / pasted "Bearer " prefixes.
+        String cleanApiKey = ai.teraunit.core.security.TokenUtil.sanitizeApiKey(request.apiKey());
+
         // ---------------------------------------------------------
         // PROTOCOL 12: SOVEREIGNTY SWITCH (GDPR/Compliance)
         // ---------------------------------------------------------
@@ -46,7 +50,7 @@ public class ProvisioningService {
         // ---------------------------------------------------------
         // PROTOCOL 5: BUREAUCRACY BYPASS (Quota & Auth)
         // ---------------------------------------------------------
-        boolean isVerified = verifier.verify(request, request.apiKey());
+        boolean isVerified = verifier.verify(request, cleanApiKey);
 
         if (!isVerified) {
             return "FAILED: QUOTA_EXCEEDED_OR_AUTH_FAILURE";
@@ -80,10 +84,10 @@ public class ProvisioningService {
         String heartbeatTokenSha256 = ai.teraunit.core.security.TokenUtil.sha256Hex(heartbeatToken);
 
         // 2. Execute
-        String compositeId = executor.provision(request, request.apiKey(), heartbeatId, heartbeatToken);
+        String compositeId = executor.provision(request, cleanApiKey, heartbeatId, heartbeatToken);
 
         // 3. PROTOCOL 6: REGISTER BIRTH
-        String storageKey = vault.encrypt(request.apiKey());
+        String storageKey = vault.encrypt(cleanApiKey);
 
         String[] parts = compositeId.split("::");
         if (parts.length == 2) {
