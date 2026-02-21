@@ -9,6 +9,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -29,8 +31,8 @@ public class VastScraper implements GpuProviderScraper {
     private boolean debugVast;
 
     public VastScraper(RestClient restClient,
-                       RedisTemplate<String, Object> redis,
-                       PriceMapper priceMapper) {
+            RedisTemplate<String, Object> redis,
+            PriceMapper priceMapper) {
         this.restClient = restClient;
         this.redis = redis;
         this.priceMapper = priceMapper;
@@ -42,45 +44,104 @@ public class VastScraper implements GpuProviderScraper {
         try {
             String endpoint = "https://console.vast.ai/api/v0/bundles/";
 
-            // Filter: Verified hosts, On-Demand (Rentable), Available
-            Map<String, Object> query = Map.of(
-                    "verified", Map.of("eq", true),
-                    "type", "on-demand",
-                    "rentable", Map.of("eq", true)
-            );
+            // Vast appears to return a fixed-size slice (often 64) with no pagination metadata.
+            // Drive pagination from the request side (limit/offset) and stop safely if the API ignores it.
+            final int limit = 256;
+            final int maxPages = 10;
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = restClient.post()
-                    .uri(endpoint)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .body(query)
-                    .retrieve()
-                    .body(Map.class);
+            Map<String, GpuOffer> offersById = new LinkedHashMap<>();
+            int offset = 0;
+            for (int page = 0; page < maxPages; page++) {
+                Map<String, Object> query = buildQuery(limit, offset);
 
-            if (response != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> response = restClient.post()
+                        .uri(endpoint)
+                        .header("Authorization", "Bearer " + apiKey)
+                        .header("Content-Type", "application/json")
+                        .body(query)
+                        .retrieve()
+                        .body(Map.class);
+
+                if (response == null) {
+                    break;
+                }
+
                 if (debugVast) {
                     debugPrintResponseMeta(response);
                 }
 
-                // 1. STANDARDIZE
-                List<GpuOffer> offers = priceMapper.mapToOffers(ProviderName.VAST, response);
-
-                // 2. PERSIST (The Missing Link)
-                if (!offers.isEmpty()) {
-                    redis.opsForValue().set("CLEAN_OFFERS:VAST", offers);
-                    System.out.println("[TeraUnit-Pulse] Vast Updated: " + offers.size() + " units online.");
+                int before = offersById.size();
+                List<GpuOffer> pageOffers = priceMapper.mapToOffers(ProviderName.VAST, response);
+                for (GpuOffer offer : pageOffers) {
+                    if (offer == null || offer.launchId() == null || offer.launchId().isBlank()) {
+                        continue;
+                    }
+                    offersById.putIfAbsent(offer.launchId(), offer);
                 }
+
+                Integer responseOffersCount = getOffersCount(response);
+                int added = offersById.size() - before;
+
+                // Stop conditions:
+                // - API returns no offers
+                // - API is ignoring limit/offset (no new IDs added)
+                // - API returned less than a full page (likely last page)
+                if (responseOffersCount == null || responseOffersCount == 0) {
+                    break;
+                }
+                if (added == 0) {
+                    break;
+                }
+                if (responseOffersCount < limit) {
+                    break;
+                }
+
+                offset += limit;
+            }
+
+            List<GpuOffer> offers = new ArrayList<>(offersById.values());
+
+            if (!offers.isEmpty()) {
+                redis.opsForValue().set("CLEAN_OFFERS:VAST", offers);
+                System.out.println("[TeraUnit-Pulse] Vast Updated: " + offers.size() + " units online.");
             }
         } catch (Exception e) {
             System.err.println("[TeraUnit-Warn] Vast Scrape Failed: " + e.getMessage());
         }
     }
 
+    private static Map<String, Object> buildQuery(int limit, int offset) {
+        LinkedHashMap<String, Object> query = new LinkedHashMap<>();
+
+        // Filter: Verified hosts, On-Demand (Rentable), Available
+        query.put("verified", Map.of("eq", true));
+        query.put("type", "on-demand");
+        query.put("rentable", Map.of("eq", true));
+
+        // Pagination knobs (if supported by Vast; safe if ignored)
+        query.put("limit", limit);
+        query.put("offset", offset);
+
+        return query;
+    }
+
+    private static Integer getOffersCount(Map<String, Object> response) {
+        Object offersObj = response.get("offers");
+        if (offersObj instanceof List<?> l) {
+            return l.size();
+        }
+        return null;
+    }
+
     private static void debugPrintResponseMeta(Map<String, Object> response) {
         try {
             Set<String> keys = new TreeSet<>();
-            keys.addAll(response.keySet());
+            for (Object k : new LinkedHashSet<>(response.keySet())) {
+                if (k != null) {
+                    keys.add(String.valueOf(k));
+                }
+            }
 
             Object offersObj = response.get("offers");
             Integer offersCount = null;
@@ -101,10 +162,10 @@ public class VastScraper implements GpuProviderScraper {
             Object paginationObj = response.get("pagination");
             Object metaObj = response.get("meta");
             String paginationKeys = (paginationObj instanceof Map<?, ?> pm)
-                    ? String.valueOf(new TreeSet<>(pm.keySet().stream().map(String::valueOf).toList()))
+                    ? String.valueOf(new TreeSet<>(pm.keySet().stream().filter(k -> k != null).map(String::valueOf).toList()))
                     : null;
             String metaKeys = (metaObj instanceof Map<?, ?> mm)
-                    ? String.valueOf(new TreeSet<>(mm.keySet().stream().map(String::valueOf).toList()))
+                    ? String.valueOf(new TreeSet<>(mm.keySet().stream().filter(k -> k != null).map(String::valueOf).toList()))
                     : null;
 
             System.out.println("[VAST-DEBUG] keys=" + keys +
@@ -114,7 +175,8 @@ public class VastScraper implements GpuProviderScraper {
                     " paginationObjKeys=" + paginationKeys +
                     " metaObjKeys=" + metaKeys);
         } catch (Exception e) {
-            System.err.println("[VAST-DEBUG] meta logging failed: " + e.getMessage());
+            String msg = e.getMessage();
+            System.err.println("[VAST-DEBUG] meta logging failed: " + (msg == null ? e.getClass().getSimpleName() : msg));
         }
     }
 }
