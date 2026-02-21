@@ -51,6 +51,7 @@ public class VastScraper implements GpuProviderScraper {
 
             Map<String, GpuOffer> offersById = new LinkedHashMap<>();
             int offset = 0;
+            int pagesFetched = 0;
             for (int page = 0; page < maxPages; page++) {
                 Map<String, Object> query = buildQuery(limit, offset);
 
@@ -67,9 +68,11 @@ public class VastScraper implements GpuProviderScraper {
                     break;
                 }
 
-                if (debugVast) {
+                if (debugVast && page == 0) {
                     debugPrintResponseMeta(response);
                 }
+
+                pagesFetched++;
 
                 int before = offersById.size();
                 List<GpuOffer> pageOffers = priceMapper.mapToOffers(ProviderName.VAST, response);
@@ -98,6 +101,10 @@ public class VastScraper implements GpuProviderScraper {
                 }
 
                 offset += limit;
+            }
+
+            if (debugVast) {
+                System.out.println("[VAST-DEBUG] paginationSummary={pagesFetched=" + pagesFetched + ", limit=" + limit + ", maxPages=" + maxPages + ", uniqueOffers=" + offersById.size() + "}");
             }
 
             List<GpuOffer> offers = new ArrayList<>(offersById.values());
