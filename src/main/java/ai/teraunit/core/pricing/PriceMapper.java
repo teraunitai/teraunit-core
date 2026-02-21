@@ -79,15 +79,15 @@ public class PriceMapper {
                             for (Object r : regions) {
                                 String regionName = null;
 
-                                if (r instanceof Map.Entry<?, ?> entry) {
+                                if (r instanceof Map.Entry<?, ?> regionEntry) {
                                     // If the key looks like a region name, prefer it.
-                                    Object k = entry.getKey();
+                                    Object k = regionEntry.getKey();
                                     if (k != null) {
                                         regionName = String.valueOf(k);
                                     }
                                     // Otherwise try to read a nested "name" from the value.
                                     if ((regionName == null || regionName.isBlank())
-                                            && entry.getValue() instanceof Map<?, ?> vm) {
+                                            && regionEntry.getValue() instanceof Map<?, ?> vm) {
                                         Object rn = vm.get("name");
                                         regionName = rn == null ? null : String.valueOf(rn);
                                     }
