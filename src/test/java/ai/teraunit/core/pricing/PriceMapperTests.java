@@ -70,6 +70,43 @@ class PriceMapperTests {
     }
 
     @Test
+    void lambdaMapping_acceptsRegionsAsString() {
+        PriceMapper mapper = new PriceMapper();
+
+        Map<String, Object> payload = Map.of(
+                "data", List.of(
+                        Map.of(
+                                "instance_type", Map.of(
+                                        "name", "gpu_1x_a10",
+                                        "price_cents_per_hour", 1234),
+                                "regions_with_capacity_available", "us-west")));
+
+        List<GpuOffer> offers = mapper.mapToOffers(ProviderName.LAMBDA, payload);
+        assertEquals(1, offers.size());
+        assertEquals("us-west", offers.getFirst().region());
+    }
+
+    @Test
+    void lambdaMapping_acceptsRegionsAsListOfStrings() {
+        PriceMapper mapper = new PriceMapper();
+
+        Map<String, Object> payload = Map.of(
+                "data", List.of(
+                        Map.of(
+                                "instance_type", Map.of(
+                                        "name", "gpu_1x_a10",
+                                        "price_cents_per_hour", 1234),
+                                "regions_with_capacity_available", List.of(
+                                        "us-west",
+                                        "us-east"))));
+
+        List<GpuOffer> offers = mapper.mapToOffers(ProviderName.LAMBDA, payload);
+        assertEquals(2, offers.size());
+        assertEquals("us-west", offers.get(0).region());
+        assertEquals("us-east", offers.get(1).region());
+    }
+
+    @Test
     void runpodMapping_mapsGpuTypesFromGraphQlResponse() {
         PriceMapper mapper = new PriceMapper();
 
