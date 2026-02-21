@@ -60,18 +60,44 @@ public class PriceMapper {
                             if (regionsObj == null) {
                                 regionsObj = typeInfo.get("regions_with_capacity_available");
                             }
-                            if (!(regionsObj instanceof List<?> regions) || regions.isEmpty()) {
+
+                            List<?> regions;
+                            if (regionsObj instanceof List<?> regionList) {
+                                regions = regionList;
+                            } else if (regionsObj instanceof Map<?, ?> regionMap) {
+                                regions = new ArrayList<>(regionMap.entrySet());
+                            } else if (regionsObj instanceof String regionString) {
+                                regions = List.of(regionString);
+                            } else {
+                                regions = List.of();
+                            }
+
+                            if (regions.isEmpty()) {
                                 continue;
                             }
 
                             for (Object r : regions) {
                                 String regionName = null;
-                                if (r instanceof Map<?, ?> rm) {
-                                    Object rn = ((Map<?, ?>) rm).get("name");
+
+                                if (r instanceof Map.Entry<?, ?> entry) {
+                                    // If the key looks like a region name, prefer it.
+                                    Object k = entry.getKey();
+                                    if (k != null) {
+                                        regionName = String.valueOf(k);
+                                    }
+                                    // Otherwise try to read a nested "name" from the value.
+                                    if ((regionName == null || regionName.isBlank())
+                                            && entry.getValue() instanceof Map<?, ?> vm) {
+                                        Object rn = vm.get("name");
+                                        regionName = rn == null ? null : String.valueOf(rn);
+                                    }
+                                } else if (r instanceof Map<?, ?> rm) {
+                                    Object rn = rm.get("name");
                                     regionName = rn == null ? null : String.valueOf(rn);
                                 } else if (r instanceof String rs) {
                                     regionName = rs;
                                 }
+
                                 if (regionName == null || regionName.isBlank()) {
                                     continue;
                                 }
