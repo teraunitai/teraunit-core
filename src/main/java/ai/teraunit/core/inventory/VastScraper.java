@@ -44,78 +44,43 @@ public class VastScraper implements GpuProviderScraper {
         try {
             String endpoint = "https://console.vast.ai/api/v0/bundles/";
 
-            // Vast appears to return a fixed-size slice (often 64) with no pagination
-            // metadata.
-            // Drive pagination from the request side (limit/offset) and stop safely if the
-            // API ignores it.
-            final int limit = 256;
-            final int maxPages = 10;
+            // Vast's bundles endpoint appears to return a fixed-size slice (often 64) and
+            // does not accept an `offset` parameter for pagination (sending it yields 400:
+            // "oplist for key offset is not a valid dict").
+            // Keep the scraper stable: make a single request, and optionally request a
+            // larger `limit` in the JSON body (Vast will cap as needed).
+            final int requestedLimit = 256;
 
             if (debugVast) {
-                System.out.println("[VAST-DEBUG] paginationConfig={limit=" + limit + ", maxPages=" + maxPages + "}");
+                System.out.println("[VAST-DEBUG] requestConfig={requestedLimit=" + requestedLimit + "}");
             }
 
-            Map<String, GpuOffer> offersById = new LinkedHashMap<>();
-            int offset = 0;
-            int pagesFetched = 0;
-            for (int page = 0; page < maxPages; page++) {
-                Map<String, Object> query = buildQuery();
-                String pagedEndpoint = endpoint + "?limit=" + limit + "&offset=" + offset;
+            Map<String, Object> query = buildQuery(requestedLimit);
 
-                @SuppressWarnings("unchecked")
-                Map<String, Object> response = restClient.post()
-                    .uri(pagedEndpoint)
-                        .header("Authorization", "Bearer " + apiKey)
-                        .header("Content-Type", "application/json")
-                        .body(query)
-                        .retrieve()
-                        .body(Map.class);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = restClient.post()
+                    .uri(endpoint)
+                    .header("Authorization", "Bearer " + apiKey)
+                    .header("Content-Type", "application/json")
+                    .body(query)
+                    .retrieve()
+                    .body(Map.class);
 
-                if (response == null) {
-                    break;
-                }
-
-                if (debugVast && page == 0) {
-                    debugPrintResponseMeta(response);
-                }
-
-                pagesFetched++;
-
-                int before = offersById.size();
-                List<GpuOffer> pageOffers = priceMapper.mapToOffers(ProviderName.VAST, response);
-                for (GpuOffer offer : pageOffers) {
-                    if (offer == null || offer.launchId() == null || offer.launchId().isBlank()) {
-                        continue;
-                    }
-                    offersById.putIfAbsent(offer.launchId(), offer);
-                }
-
-                Integer responseOffersCount = getOffersCount(response);
-                int added = offersById.size() - before;
-
-                // Stop conditions:
-                // - API returns no offers
-                // - API is ignoring limit/offset (no new IDs added)
-                // - API returned less than a full page (likely last page)
-                if (responseOffersCount == null || responseOffersCount == 0) {
-                    break;
-                }
-                if (added == 0) {
-                    break;
-                }
-                if (responseOffersCount < limit) {
-                    break;
-                }
-
-                offset += limit;
+            if (response == null) {
+                return;
             }
 
             if (debugVast) {
-                System.out.println("[VAST-DEBUG] paginationSummary={pagesFetched=" + pagesFetched + ", limit=" + limit
-                        + ", maxPages=" + maxPages + ", uniqueOffers=" + offersById.size() + "}");
+                debugPrintResponseMeta(response);
             }
 
-            List<GpuOffer> offers = new ArrayList<>(offersById.values());
+            List<GpuOffer> offers = priceMapper.mapToOffers(ProviderName.VAST, response);
+
+            if (debugVast) {
+                Integer offersCount = getOffersCount(response);
+                System.out.println("[VAST-DEBUG] mappedOffers=" + (offers == null ? 0 : offers.size())
+                        + " responseOffersCount=" + offersCount);
+            }
 
             if (!offers.isEmpty()) {
                 redis.opsForValue().set("CLEAN_OFFERS:VAST", offers);
@@ -126,13 +91,18 @@ public class VastScraper implements GpuProviderScraper {
         }
     }
 
-    private static Map<String, Object> buildQuery() {
+    private static Map<String, Object> buildQuery(int requestedLimit) {
         LinkedHashMap<String, Object> query = new LinkedHashMap<>();
 
         // Filter: Verified hosts, On-Demand (Rentable), Available
         query.put("verified", Map.of("eq", true));
         query.put("type", "on-demand");
         query.put("rentable", Map.of("eq", true));
+
+        // Vast CLI uses a `limit` key in the request body for search-like endpoints.
+        // Empirically, Vast still caps the returned array size (often 64), but including
+        // this key is safe and may allow higher counts if/when the API supports it.
+        query.put("limit", requestedLimit);
 
         return query;
     }
