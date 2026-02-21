@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -87,20 +88,31 @@ public class VastScraper implements GpuProviderScraper {
                 offersCount = l.size();
             }
 
-            Map<String, Object> pagination = Map.of(
-                    "total", response.get("total"),
-                    "count", response.get("count"),
-                    "limit", response.get("limit"),
-                    "offset", response.get("offset"),
-                    "next", response.get("next"),
-                    "previous", response.get("previous"),
-                    "page", response.get("page"),
-                    "page_size", response.get("page_size"));
+            Map<String, Object> pagination = new LinkedHashMap<>();
+            pagination.put("total", response.get("total"));
+            pagination.put("count", response.get("count"));
+            pagination.put("limit", response.get("limit"));
+            pagination.put("offset", response.get("offset"));
+            pagination.put("next", response.get("next"));
+            pagination.put("previous", response.get("previous"));
+            pagination.put("page", response.get("page"));
+            pagination.put("page_size", response.get("page_size"));
+
+            Object paginationObj = response.get("pagination");
+            Object metaObj = response.get("meta");
+            String paginationKeys = (paginationObj instanceof Map<?, ?> pm)
+                    ? String.valueOf(new TreeSet<>(pm.keySet().stream().map(String::valueOf).toList()))
+                    : null;
+            String metaKeys = (metaObj instanceof Map<?, ?> mm)
+                    ? String.valueOf(new TreeSet<>(mm.keySet().stream().map(String::valueOf).toList()))
+                    : null;
 
             System.out.println("[VAST-DEBUG] keys=" + keys +
                     " offersType=" + (offersObj == null ? "null" : offersObj.getClass().getSimpleName()) +
                     " offersCount=" + offersCount +
-                    " pagination=" + pagination);
+                    " pagination=" + pagination +
+                    " paginationObjKeys=" + paginationKeys +
+                    " metaObjKeys=" + metaKeys);
         } catch (Exception e) {
             System.err.println("[VAST-DEBUG] meta logging failed: " + e.getMessage());
         }
