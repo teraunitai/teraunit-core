@@ -44,8 +44,10 @@ public class VastScraper implements GpuProviderScraper {
         try {
             String endpoint = "https://console.vast.ai/api/v0/bundles/";
 
-            // Vast appears to return a fixed-size slice (often 64) with no pagination metadata.
-            // Drive pagination from the request side (limit/offset) and stop safely if the API ignores it.
+            // Vast appears to return a fixed-size slice (often 64) with no pagination
+            // metadata.
+            // Drive pagination from the request side (limit/offset) and stop safely if the
+            // API ignores it.
             final int limit = 256;
             final int maxPages = 10;
 
@@ -57,11 +59,12 @@ public class VastScraper implements GpuProviderScraper {
             int offset = 0;
             int pagesFetched = 0;
             for (int page = 0; page < maxPages; page++) {
-                Map<String, Object> query = buildQuery(limit, offset);
+                Map<String, Object> query = buildQuery();
+                String pagedEndpoint = endpoint + "?limit=" + limit + "&offset=" + offset;
 
                 @SuppressWarnings("unchecked")
                 Map<String, Object> response = restClient.post()
-                        .uri(endpoint)
+                    .uri(pagedEndpoint)
                         .header("Authorization", "Bearer " + apiKey)
                         .header("Content-Type", "application/json")
                         .body(query)
@@ -108,7 +111,8 @@ public class VastScraper implements GpuProviderScraper {
             }
 
             if (debugVast) {
-                System.out.println("[VAST-DEBUG] paginationSummary={pagesFetched=" + pagesFetched + ", limit=" + limit + ", maxPages=" + maxPages + ", uniqueOffers=" + offersById.size() + "}");
+                System.out.println("[VAST-DEBUG] paginationSummary={pagesFetched=" + pagesFetched + ", limit=" + limit
+                        + ", maxPages=" + maxPages + ", uniqueOffers=" + offersById.size() + "}");
             }
 
             List<GpuOffer> offers = new ArrayList<>(offersById.values());
@@ -122,17 +126,13 @@ public class VastScraper implements GpuProviderScraper {
         }
     }
 
-    private static Map<String, Object> buildQuery(int limit, int offset) {
+    private static Map<String, Object> buildQuery() {
         LinkedHashMap<String, Object> query = new LinkedHashMap<>();
 
         // Filter: Verified hosts, On-Demand (Rentable), Available
         query.put("verified", Map.of("eq", true));
         query.put("type", "on-demand");
         query.put("rentable", Map.of("eq", true));
-
-        // Pagination knobs (if supported by Vast; safe if ignored)
-        query.put("limit", limit);
-        query.put("offset", offset);
 
         return query;
     }
@@ -173,10 +173,12 @@ public class VastScraper implements GpuProviderScraper {
             Object paginationObj = response.get("pagination");
             Object metaObj = response.get("meta");
             String paginationKeys = (paginationObj instanceof Map<?, ?> pm)
-                    ? String.valueOf(new TreeSet<>(pm.keySet().stream().filter(k -> k != null).map(String::valueOf).toList()))
+                    ? String.valueOf(
+                            new TreeSet<>(pm.keySet().stream().filter(k -> k != null).map(String::valueOf).toList()))
                     : null;
             String metaKeys = (metaObj instanceof Map<?, ?> mm)
-                    ? String.valueOf(new TreeSet<>(mm.keySet().stream().filter(k -> k != null).map(String::valueOf).toList()))
+                    ? String.valueOf(
+                            new TreeSet<>(mm.keySet().stream().filter(k -> k != null).map(String::valueOf).toList()))
                     : null;
 
             System.out.println("[VAST-DEBUG] keys=" + keys +
@@ -187,7 +189,8 @@ public class VastScraper implements GpuProviderScraper {
                     " metaObjKeys=" + metaKeys);
         } catch (Exception e) {
             String msg = e.getMessage();
-            System.err.println("[VAST-DEBUG] meta logging failed: " + (msg == null ? e.getClass().getSimpleName() : msg));
+            System.err
+                    .println("[VAST-DEBUG] meta logging failed: " + (msg == null ? e.getClass().getSimpleName() : msg));
         }
     }
 }
