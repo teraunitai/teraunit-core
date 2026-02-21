@@ -49,6 +49,10 @@ public class VastScraper implements GpuProviderScraper {
             final int limit = 256;
             final int maxPages = 10;
 
+            if (debugVast) {
+                System.out.println("[VAST-DEBUG] paginationConfig={limit=" + limit + ", maxPages=" + maxPages + "}");
+            }
+
             Map<String, GpuOffer> offersById = new LinkedHashMap<>();
             int offset = 0;
             int pagesFetched = 0;

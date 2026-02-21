@@ -22,6 +22,9 @@ public class RunPodScraper implements GpuProviderScraper {
     @Value("${RUNPOD_API_KEY:EMBEDDED_READ_ONLY}")
     private String apiKey;
 
+    @Value("${TERA_DEBUG_RUNPOD:false}")
+    private boolean debugRunPod;
+
     public RunPodScraper(RestClient restClient,
                          RedisTemplate<String, Object> redis,
                          PriceMapper priceMapper) {
@@ -58,10 +61,26 @@ public class RunPodScraper implements GpuProviderScraper {
                 // 1. STANDARDIZE (Map to GpuOffer)
                 List<GpuOffer> offers = priceMapper.mapToOffers(ProviderName.RUNPOD, response);
 
+                if (debugRunPod) {
+                    Integer rawGpuTypesCount = null;
+                    Object errorsObj = response.get("errors");
+                    Object dataObj = response.get("data");
+                    if (dataObj instanceof Map<?, ?> dataMap) {
+                        Object gpuTypesObj = dataMap.get("gpuTypes");
+                        if (gpuTypesObj instanceof List<?> gpuTypesList) {
+                            rawGpuTypesCount = gpuTypesList.size();
+                        }
+                    }
+
+                    System.out.println("[RUNPOD-DEBUG] rawGpuTypesCount=" + rawGpuTypesCount +
+                            " mappedOffers=" + offers.size() +
+                            " hasErrors=" + (errorsObj != null));
+                }
+
                 // 2. PERSIST (Write to Redis Vault)
                 if (!offers.isEmpty()) {
                     redis.opsForValue().set("CLEAN_OFFERS:RUNPOD", offers);
-                    System.out.println("[TeraUnit-Pulse] RunPod Updated: " + offers.size() + " SKUs online.");
+                    System.out.println("[TeraUnit-Pulse] RunPod Updated: " + offers.size() + " SKUs (gpuTypes) online.");
                 }
             }
         } catch (Exception e) {
